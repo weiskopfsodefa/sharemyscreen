@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>sharemyscreen – Bildschirm live auf alle Tablets</title>
+  <meta name="description" content="Bildschirm vom Laptop live auf Tablets im selben WLAN streamen. Ohne Installation, Video bleibt im lokalen Netz." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ffaa2b'/%3E%3Cpath d='M12 9.5v13l11-6.5z' fill='%230f0a06'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Spline+Sans+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">share<b>my</b>screen<span class="tld">.de</span></a>
+    <span class="badge"><span class="led"></span>P2P · LOKAL</span>
+  </header>
+
+  <main class="hero">
+    <h1>Ein Bildschirm.<br /><em>Alle Tablets.</em></h1>
+    <p class="sub">
+      Teile den Laptop-Bildschirm live mit allen Tablets in der Kneipe.
+      Das Video bleibt im lokalen WLAN – kein Ruckeln übers Internet, keine Installation.
+    </p>
+    <div class="actions">
+      <a class="btn btn-primary" href="/host">▶&nbsp;&nbsp;Raum starten</a>
+      <span class="divider">— ODER —</span>
+      <form class="field" id="join-form" autocomplete="off">
+        <input type="text" id="join-code" placeholder="RAUMCODE" maxlength="6" inputmode="latin" autocapitalize="characters" aria-label="Raumcode" />
+        <button class="btn btn-ghost" type="submit">Beitreten</button>
+      </form>
+    </div>
+    <p class="footnote">WebRTC P2P · 720p / 15 fps · Chrome &amp; Edge</p>
+  </main>
+
+  <script>
+    document.getElementById('join-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      const code = document.getElementById('join-code').value.trim().toUpperCase();
+      if (code) location.href = `/v/${code}`;
+    });
+  </script>
+</body>
+</html>

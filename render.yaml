@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: sharemyscreen
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci
+    startCommand: node server.js
+    healthCheckPath: /

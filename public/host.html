@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Regie – sharemyscreen</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ffaa2b'/%3E%3Cpath d='M12 9.5v13l11-6.5z' fill='%230f0a06'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Spline+Sans+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">share<b>my</b>screen<span class="tld">.de</span></a>
+    <span class="badge" id="onair-badge"><span class="led"></span><span id="onair-text">Bereit</span></span>
+  </header>
+
+  <main class="layout">
+    <div class="cards">
+      <section class="card">
+        <h2>Raum</h2>
+        <div class="room-code" id="room-code">––––––</div>
+        <div class="qr-frame"><img id="qr-img" width="240" height="240" alt="QR-Code zum Beitreten" hidden /></div>
+        <p class="join-url" id="join-url">Raum wird erstellt…</p>
+        <button class="btn btn-ghost" id="copy-link" disabled>Link kopieren</button>
+        <p class="hint">Tablets scannen den QR-Code oder öffnen den Link – fertig.</p>
+      </section>
+
+      <section class="card">
+        <h2>Übertragung</h2>
+        <button class="btn btn-primary" id="share-btn" disabled>▶&nbsp;&nbsp;Bildschirm teilen</button>
+        <button class="btn btn-danger" id="stop-btn" hidden>■&nbsp;&nbsp;Übertragung beenden</button>
+        <label class="checkbox-row">
+          <input type="checkbox" id="audio-checkbox" />
+          Laptop-Ton mitübertragen (experimentell)
+        </label>
+        <p class="hint">
+          Für Ton: im Auswahl-Dialog „Gesamter Bildschirm“ wählen und
+          „Systemaudio teilen“ anhaken. Ziel: 1280×720, 15&nbsp;fps,
+          max. 1,2&nbsp;Mbit/s pro Tablet.
+        </p>
+        <video class="preview" id="preview" autoplay playsinline muted></video>
+      </section>
+    </div>
+
+    <div class="alert" id="relay-alert">
+      ⚠ Mindestens ein Tablet ist über ein Internet-Relay verbunden – das Video läuft
+      nicht lokal und kann ruckeln. WLAN prüfen (Client-Isolation am Router ausschalten).
+    </div>
+
+    <section class="card">
+      <h2>Tablets <span id="viewer-count"></span></h2>
+      <table class="viewers">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Gerät</th>
+            <th>Status</th>
+            <th>Weg</th>
+            <th>Bitrate</th>
+            <th>fps</th>
+            <th>Verlust</th>
+            <th>Ping</th>
+          </tr>
+        </thead>
+        <tbody id="viewer-rows">
+          <tr class="empty-row"><td colspan="8">Noch keine Tablets verbunden – QR-Code scannen.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <p class="statusline"><span class="led" id="ws-led"></span><span id="ws-status">Verbinde mit Server…</span></p>
+  </main>
+
+  <script type="module" src="/js/host.js"></script>
+</body>
+</html>
