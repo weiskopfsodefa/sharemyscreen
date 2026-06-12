@@ -72,13 +72,20 @@ try {
   if (!/^[A-Z2-9]{6}$/.test(created.code)) fail({ reason: `Ungültiger Raumcode: ${created.code}` });
   console.log(`✓ Raum erstellt: ${created.code}`);
 
-  // 2. Viewer tritt bei
+  // 2. Viewer tritt mit Gerätenamen bei
   const viewer = await openSocket();
-  sendJson({ socket: viewer, message: { type: 'viewer:join', code: created.code } });
+  sendJson({ socket: viewer, message: { type: 'viewer:join', code: created.code, name: 'Tablet Theke\u0007' } });
   const joined = await waitFor({ socket: viewer, type: 'viewer:joined' });
   const hostNotified = await waitFor({ socket: host, type: 'viewer:joined' });
   if (hostNotified.viewerId !== joined.viewerId) fail({ reason: 'Viewer-IDs stimmen nicht überein' });
-  console.log(`✓ Viewer beigetreten: ${joined.viewerId}`);
+  if (hostNotified.name !== 'Tablet Theke') fail({ reason: `Name nicht/falsch übermittelt: ${hostNotified.name}` });
+  console.log(`✓ Viewer beigetreten: ${joined.viewerId} („${hostNotified.name}“, Steuerzeichen entfernt)`);
+
+  // 2b. Viewer benennt sich um
+  sendJson({ socket: viewer, message: { type: 'viewer:rename', name: 'Billard' } });
+  const renamed = await waitFor({ socket: host, type: 'viewer:renamed' });
+  if (renamed.viewerId !== joined.viewerId || renamed.name !== 'Billard') fail({ reason: 'Umbenennen fehlgeschlagen' });
+  console.log('✓ Umbenennen wird an den Host weitergeleitet');
 
   // 3. Signaling Host -> Viewer (Offer) und zurück (Answer)
   sendJson({

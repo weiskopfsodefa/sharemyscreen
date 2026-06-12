@@ -86,9 +86,15 @@ function handleHostReclaim({ socket, message }) {
   socket.meta = { role: 'host', code: message.code };
   send({ socket, message: { type: 'host:created', code: message.code, hostToken: room.hostToken } });
   broadcastToViewers({ room, message: { type: 'host:online' } });
-  for (const viewerId of room.viewers.keys()) {
-    send({ socket, message: { type: 'viewer:joined', viewerId } });
+  for (const [viewerId, viewerSocket] of room.viewers) {
+    send({ socket, message: { type: 'viewer:joined', viewerId, name: viewerSocket.meta?.name ?? null } });
   }
+}
+
+function sanitizeName({ name }) {
+  if (typeof name !== 'string') return null;
+  const clean = name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40);
+  return clean || null;
 }
 
 function handleViewerJoin({ socket, message }) {
@@ -104,10 +110,20 @@ function handleViewerJoin({ socket, message }) {
     send({ socket, message: { type: 'error', code: 'room-full' } });
     return;
   }
+  const name = sanitizeName({ name: message.name });
   room.viewers.set(viewerId, socket);
-  socket.meta = { role: 'viewer', code, viewerId };
+  socket.meta = { role: 'viewer', code, viewerId, name };
   send({ socket, message: { type: 'viewer:joined', viewerId, hostOnline: Boolean(room.hostSocket) } });
-  send({ socket: room.hostSocket, message: { type: 'viewer:joined', viewerId } });
+  send({ socket: room.hostSocket, message: { type: 'viewer:joined', viewerId, name } });
+}
+
+function handleViewerRename({ socket, message }) {
+  const meta = socket.meta;
+  if (meta?.role !== 'viewer') return;
+  const room = rooms.get(meta.code);
+  if (!room) return;
+  meta.name = sanitizeName({ name: message.name });
+  send({ socket: room.hostSocket, message: { type: 'viewer:renamed', viewerId: meta.viewerId, name: meta.name } });
 }
 
 function handleSignal({ socket, message }) {
@@ -144,6 +160,7 @@ const MESSAGE_HANDLERS = {
   'host:create': handleHostCreate,
   'host:reclaim': handleHostReclaim,
   'viewer:join': handleViewerJoin,
+  'viewer:rename': handleViewerRename,
   signal: handleSignal,
 };
 

@@ -12,6 +12,7 @@ const ui = {
   statusText: document.getElementById('status-text'),
   substatusText: document.getElementById('substatus-text'),
   tapToStart: document.getElementById('tap-to-start'),
+  renameBtn: document.getElementById('rename-btn'),
   pathChip: document.getElementById('path-chip'),
   controls: document.getElementById('controls'),
   muteBtn: document.getElementById('mute-btn'),
@@ -20,9 +21,11 @@ const ui = {
 
 const roomCode = location.pathname.split('/').pop().toUpperCase();
 const VIEWER_ID_KEY = `sms-viewer-${roomCode}`;
+const DEVICE_NAME_KEY = 'sms-device-name';
 
 const state = {
   viewerId: sessionStorage.getItem(VIEWER_ID_KEY) || null,
+  deviceModel: null,
   pc: null,
   // Kandidaten, die eintreffen, bevor setRemoteDescription fertig ist – sonst gehen
   // ausgerechnet die zuerst gesendeten lokalen LAN-Kandidaten verloren.
@@ -54,9 +57,40 @@ const signaling = new SignalingClient({
   },
 });
 
-function joinRoom() {
-  signaling.send({ message: { type: 'viewer:join', code: roomCode, viewerId: state.viewerId } });
+// Der vom Nutzer vergebene Gerätename ist für Webseiten nicht auslesbar –
+// das Gerätemodell (z. B. "SM-T510") aus den Client Hints ist das Nächstbeste.
+async function detectDeviceModel() {
+  try {
+    const hints = await navigator.userAgentData?.getHighEntropyValues?.(['model']);
+    if (hints?.model) return hints.model;
+  } catch {
+    // Client Hints nicht verfügbar – unten Fallback über den User-Agent.
+  }
+  const match = navigator.userAgent.match(/\(Linux;[^)]*Android[^;)]*;\s*([^);]+)/);
+  return match ? match[1].trim() : null;
 }
+
+function deviceName() {
+  return localStorage.getItem(DEVICE_NAME_KEY) || state.deviceModel || null;
+}
+
+function joinRoom() {
+  signaling.send({
+    message: { type: 'viewer:join', code: roomCode, viewerId: state.viewerId, name: deviceName() },
+  });
+}
+
+ui.renameBtn.addEventListener('click', () => {
+  const input = prompt('Name dieses Tablets (z. B. „Theke“):', deviceName() ?? '');
+  if (input === null) return;
+  const name = input.trim().slice(0, 40);
+  if (name) {
+    localStorage.setItem(DEVICE_NAME_KEY, name);
+  } else {
+    localStorage.removeItem(DEVICE_NAME_KEY);
+  }
+  signaling.send({ message: { type: 'viewer:rename', name: deviceName() } });
+});
 
 const MESSAGE_HANDLERS = {
   'viewer:joined': ({ message }) => {
@@ -249,5 +283,8 @@ if (!/^[A-Z0-9]{4,8}$/.test(roomCode)) {
   setStatus({ text: 'Ungültiger Link', sub: 'Bitte QR-Code neu scannen.' });
 } else {
   setStatus({ text: 'Verbinde…', sub: `Raum ${roomCode}` });
-  signaling.connect();
+  detectDeviceModel().then((model) => {
+    state.deviceModel = model;
+    signaling.connect();
+  });
 }

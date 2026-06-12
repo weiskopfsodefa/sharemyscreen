@@ -87,8 +87,14 @@ const MESSAGE_HANDLERS = {
     sessionStorage.setItem(SESSION_KEY, JSON.stringify({ code: message.code, hostToken: message.hostToken }));
     renderRoom();
   },
-  'viewer:joined': ({ message }) => addViewer({ viewerId: message.viewerId }),
+  'viewer:joined': ({ message }) => addViewer({ viewerId: message.viewerId, name: message.name }),
   'viewer:left': ({ message }) => removeViewer({ viewerId: message.viewerId }),
+  'viewer:renamed': ({ message }) => {
+    const viewer = state.viewers.get(message.viewerId);
+    if (!viewer) return;
+    viewer.name = message.name || null;
+    renderViewers();
+  },
   signal: ({ message }) => handleViewerSignal({ viewerId: message.from, payload: message.payload }),
   error: ({ message }) => {
     if (message.code === 'room-not-found') {
@@ -169,12 +175,13 @@ function stopShare() {
 
 // --- Pro Tablet eine eigene WebRTC-Verbindung (P2P-Fanout) ---
 
-function addViewer({ viewerId }) {
+function addViewer({ viewerId, name }) {
   let viewer = state.viewers.get(viewerId);
   if (!viewer) {
     viewer = {
       pc: null,
-      label: `Tablet ${state.nextLabelNumber++}`,
+      number: state.nextLabelNumber++,
+      name: name || null,
       status: 'wartet',
       stats: null,
       lastBytesSent: null,
@@ -182,6 +189,8 @@ function addViewer({ viewerId }) {
       pendingCandidates: [],
     };
     state.viewers.set(viewerId, viewer);
+  } else if (name) {
+    viewer.name = name;
   }
   if (state.stream) {
     connectViewer({ viewerId });
@@ -341,6 +350,17 @@ setInterval(async () => {
   renderViewers();
 }, STATS_INTERVAL_MS);
 
+function viewerDisplayName({ viewer }) {
+  return viewer.name || `Tablet ${viewer.number}`;
+}
+
+// Namen kommen von fremden Geräten und landen in innerHTML – immer escapen.
+function escapeHtml({ text }) {
+  return String(text).replace(/[&<>"']/g, (ch) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ));
+}
+
 function renderViewers() {
   const connected = [...state.viewers.values()].filter((viewer) => viewer.status === 'verbunden').length;
   ui.viewerCount.textContent = state.viewers.size ? `· ${connected}/${state.viewers.size} verbunden` : '';
@@ -358,7 +378,7 @@ function renderViewers() {
       const ledClass = viewer.status === 'verbunden' ? 'ok' : viewer.status === 'wartet' ? '' : 'warn';
       return `<tr>
         <td><span class="led ${ledClass}"></span></td>
-        <td class="name">${viewer.label}</td>
+        <td class="name">${escapeHtml({ text: viewerDisplayName({ viewer }) })}</td>
         <td>${viewer.status}</td>
         <td>${path ? `<span class="chip ${path.css}" title="${path.hint}">${path.text}</span>` : '–'}</td>
         <td>${formatBitrate({ bits: stats?.bitrate ?? null })}</td>
