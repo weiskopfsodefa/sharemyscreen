@@ -13,6 +13,7 @@ const ui = {
   substatusText: document.getElementById('substatus-text'),
   tapToStart: document.getElementById('tap-to-start'),
   renameBtn: document.getElementById('rename-btn'),
+  zoomChip: document.getElementById('zoom-chip'),
   pathChip: document.getElementById('path-chip'),
   controls: document.getElementById('controls'),
   muteBtn: document.getElementById('mute-btn'),
@@ -249,6 +250,99 @@ document.addEventListener('visibilitychange', () => {
     playVideo();
   }
 });
+
+// --- Zoom & Schwenken auf dem Stream (Pinch, Ziehen, Doppeltipp) ---
+// Browser-Pinch ist per Viewport-Meta deaktiviert, damit nur das Video zoomt,
+// nicht die Bedienelemente – deshalb hier eigene Gesten über Pointer Events.
+
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 6;
+const DOUBLE_TAP_ZOOM = 2.5;
+
+const zoom = { scale: 1, tx: 0, ty: 0, pointers: new Map() };
+
+function clampPan() {
+  const maxX = ((zoom.scale - 1) * window.innerWidth) / 2;
+  const maxY = ((zoom.scale - 1) * window.innerHeight) / 2;
+  zoom.tx = Math.min(maxX, Math.max(-maxX, zoom.tx));
+  zoom.ty = Math.min(maxY, Math.max(-maxY, zoom.ty));
+}
+
+function applyZoom() {
+  clampPan();
+  ui.video.style.transform =
+    zoom.scale === 1 ? '' : `translate(${zoom.tx}px, ${zoom.ty}px) scale(${zoom.scale})`;
+  ui.zoomChip.hidden = zoom.scale === 1;
+  ui.zoomChip.textContent = `${zoom.scale.toFixed(1)}× · zurücksetzen`;
+}
+
+// Zoomt so, dass der Bildpunkt unter (x, y) an Ort und Stelle bleibt.
+function zoomAround({ scale, x, y }) {
+  const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, scale));
+  const dx = x - window.innerWidth / 2;
+  const dy = y - window.innerHeight / 2;
+  zoom.tx = dx - (next / zoom.scale) * (dx - zoom.tx);
+  zoom.ty = dy - (next / zoom.scale) * (dy - zoom.ty);
+  zoom.scale = next;
+  applyZoom();
+}
+
+function resetZoom() {
+  zoom.scale = 1;
+  zoom.tx = 0;
+  zoom.ty = 0;
+  applyZoom();
+}
+
+function pinchInfo() {
+  const [a, b] = [...zoom.pointers.values()];
+  return { dist: Math.hypot(a.x - b.x, a.y - b.y), midX: (a.x + b.x) / 2, midY: (a.y + b.y) / 2 };
+}
+
+ui.video.addEventListener('pointerdown', (event) => {
+  ui.video.setPointerCapture(event.pointerId);
+  zoom.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+});
+
+ui.video.addEventListener('pointermove', (event) => {
+  const prev = zoom.pointers.get(event.pointerId);
+  if (!prev) return;
+  const current = { x: event.clientX, y: event.clientY };
+  if (zoom.pointers.size === 2) {
+    const before = pinchInfo();
+    zoom.pointers.set(event.pointerId, current);
+    const after = pinchInfo();
+    zoom.tx += after.midX - before.midX;
+    zoom.ty += after.midY - before.midY;
+    zoomAround({ scale: zoom.scale * (after.dist / before.dist), x: after.midX, y: after.midY });
+  } else if (zoom.scale > 1) {
+    zoom.pointers.set(event.pointerId, current);
+    zoom.tx += current.x - prev.x;
+    zoom.ty += current.y - prev.y;
+    applyZoom();
+  }
+});
+
+for (const type of ['pointerup', 'pointercancel']) {
+  ui.video.addEventListener(type, (event) => zoom.pointers.delete(event.pointerId));
+}
+
+ui.video.addEventListener('dblclick', (event) => {
+  if (zoom.scale > 1) {
+    resetZoom();
+  } else {
+    zoomAround({ scale: DOUBLE_TAP_ZOOM, x: event.clientX, y: event.clientY });
+  }
+});
+
+// Trackpad-Pinch am Desktop kommt als Strg+Scroll an.
+ui.video.addEventListener('wheel', (event) => {
+  if (!event.ctrlKey) return;
+  event.preventDefault();
+  zoomAround({ scale: zoom.scale * (1 - event.deltaY * 0.01), x: event.clientX, y: event.clientY });
+}, { passive: false });
+
+ui.zoomChip.addEventListener('click', resetZoom);
 
 // --- Bedienelemente ein-/ausblenden ---
 

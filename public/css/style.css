@@ -447,6 +447,25 @@ body.viewer-page::before { display: none; }
   height: 100%;
   object-fit: contain;
   background: #000;
+  touch-action: none;
+  transform-origin: center center;
+}
+
+.zoom-chip {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 20;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  color: var(--amber);
+  background: rgba(15, 10, 6, 0.78);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
 }
 
 .viewer-overlay {
