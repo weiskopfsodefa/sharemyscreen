@@ -2,6 +2,7 @@ import { SignalingClient } from './signaling.js';
 import { createPeerConnection, readConnectionStats, PATH_LABELS } from './webrtc.js';
 
 const REJOIN_DELAY_MS = 2000;
+const JOIN_RETRY_MS = 10_000;
 const DISCONNECT_GRACE_MS = 4000;
 const CONTROLS_FADE_MS = 3500;
 const STATS_INTERVAL_MS = 3000;
@@ -33,9 +34,17 @@ const state = {
   pendingCandidates: [],
   wakeLock: null,
   rejoinTimer: null,
+  joinRetryTimer: null,
   fadeTimer: null,
   stuckTimer: null,
 };
+
+// Raum-Codes sind dauerhaft: Kommt der Host (oder der Server) zurück, existiert
+// derselbe Code wieder – deshalb nie aufgeben, sondern periodisch neu versuchen.
+function scheduleJoinRetry() {
+  clearTimeout(state.joinRetryTimer);
+  state.joinRetryTimer = setTimeout(() => joinRoom(), JOIN_RETRY_MS);
+}
 
 function setStatus({ text, sub = '' }) {
   ui.overlay.classList.remove('hidden');
@@ -95,6 +104,7 @@ ui.renameBtn.addEventListener('click', () => {
 
 const MESSAGE_HANDLERS = {
   'viewer:joined': ({ message }) => {
+    clearTimeout(state.joinRetryTimer);
     state.viewerId = message.viewerId;
     sessionStorage.setItem(VIEWER_ID_KEY, message.viewerId);
     if (!state.pc) {
@@ -112,11 +122,13 @@ const MESSAGE_HANDLERS = {
   },
   'room:closed': () => {
     teardownPeer();
-    setStatus({ text: 'Raum wurde geschlossen', sub: 'Bitte neuen QR-Code scannen.' });
+    setStatus({ text: 'Raum gerade nicht aktiv', sub: 'Verbinde automatisch neu, sobald der Host zurück ist…' });
+    scheduleJoinRetry();
   },
   error: ({ message }) => {
     if (message.code === 'room-not-found') {
-      setStatus({ text: 'Raum nicht gefunden', sub: `Code „${roomCode}“ prüfen oder QR-Code neu scannen.` });
+      setStatus({ text: 'Raum nicht aktiv', sub: `Warte auf Raum „${roomCode}“ – verbinde automatisch…` });
+      scheduleJoinRetry();
     } else if (message.code === 'room-full') {
       setStatus({ text: 'Raum ist voll', sub: 'Maximale Anzahl Tablets erreicht.' });
     }

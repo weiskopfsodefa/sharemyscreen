@@ -16,7 +16,17 @@ const CAPTURE_VIDEO = { frameRate: { ideal: 30, max: 30 } };
 // Sprachverarbeitung aus – die ist für Mikrofone gedacht und verstümmelt Systemaudio/Musik.
 const CAPTURE_AUDIO = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
 const STATS_INTERVAL_MS = 2000;
-const SESSION_KEY = 'sms-host-room';
+const LAST_ROOM_KEY = 'sms-host:last';
+
+function tokenKey({ code }) {
+  return `sms-host:${code}`;
+}
+
+// Raum-Code aus der URL (/CODE), falls die Regie darüber geöffnet wurde.
+const urlCode = (() => {
+  const segment = location.pathname.split('/').pop().toUpperCase();
+  return /^[A-Z0-9]{4,8}$/.test(segment) && segment !== 'HOST' ? segment : null;
+})();
 
 const ui = {
   roomCode: document.getElementById('room-code'),
@@ -52,17 +62,13 @@ const state = {
 
 const signaling = new SignalingClient({
   onOpen: () => {
-    if (state.hostToken) {
-      signaling.send({ message: { type: 'host:reclaim', code: state.code, hostToken: state.hostToken } });
+    const saved = state.hostToken ? { code: state.code, hostToken: state.hostToken } : readSavedRoom();
+    if (saved) {
+      state.code = saved.code;
+      state.hostToken = saved.hostToken;
+      signaling.send({ message: { type: 'host:reclaim', code: saved.code, hostToken: saved.hostToken } });
     } else {
-      const saved = readSavedRoom();
-      if (saved) {
-        state.code = saved.code;
-        state.hostToken = saved.hostToken;
-        signaling.send({ message: { type: 'host:reclaim', ...saved } });
-      } else {
-        signaling.send({ message: { type: 'host:create' } });
-      }
+      signaling.send({ message: { type: 'host:create' } });
     }
   },
   onMessage: ({ message }) => {
@@ -76,18 +82,22 @@ const signaling = new SignalingClient({
 });
 
 function readSavedRoom() {
-  try {
-    return JSON.parse(sessionStorage.getItem(SESSION_KEY));
-  } catch {
-    return null;
-  }
+  const code = urlCode || localStorage.getItem(LAST_ROOM_KEY);
+  if (!code) return null;
+  const hostToken = localStorage.getItem(tokenKey({ code }));
+  return hostToken ? { code, hostToken } : null;
 }
 
 const MESSAGE_HANDLERS = {
   'host:created': ({ message }) => {
     state.code = message.code;
     state.hostToken = message.hostToken;
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ code: message.code, hostToken: message.hostToken }));
+    localStorage.setItem(tokenKey({ code: message.code }), message.hostToken);
+    localStorage.setItem(LAST_ROOM_KEY, message.code);
+    // Die Adresszeile des Hosts IST der Beitritts-Link.
+    if (location.pathname !== `/${message.code}`) {
+      history.replaceState(null, '', `/${message.code}`);
+    }
     renderRoom();
   },
   'viewer:joined': ({ message }) => addViewer({ viewerId: message.viewerId, name: message.name }),
@@ -101,8 +111,9 @@ const MESSAGE_HANDLERS = {
   signal: ({ message }) => handleViewerSignal({ viewerId: message.from, payload: message.payload }),
   error: ({ message }) => {
     if (message.code === 'room-not-found') {
-      // Gespeicherter Raum ist abgelaufen – neuen anlegen.
-      sessionStorage.removeItem(SESSION_KEY);
+      // Reclaim abgelehnt (Token passt nicht) – gespeicherten Raum verwerfen, neuen anlegen.
+      if (state.code) localStorage.removeItem(tokenKey({ code: state.code }));
+      localStorage.removeItem(LAST_ROOM_KEY);
       state.code = null;
       state.hostToken = null;
       signaling.send({ message: { type: 'host:create' } });
@@ -111,7 +122,7 @@ const MESSAGE_HANDLERS = {
 };
 
 function renderRoom() {
-  const joinUrl = `${location.origin}/v/${state.code}`;
+  const joinUrl = `${location.origin}/${state.code}`;
   ui.roomCode.textContent = state.code;
   ui.joinUrl.textContent = joinUrl;
   ui.copyLink.disabled = false;
@@ -121,7 +132,7 @@ function renderRoom() {
 }
 
 ui.copyLink.addEventListener('click', async () => {
-  await navigator.clipboard.writeText(`${location.origin}/v/${state.code}`);
+  await navigator.clipboard.writeText(`${location.origin}/${state.code}`);
   ui.copyLink.textContent = 'Kopiert ✓';
   setTimeout(() => (ui.copyLink.textContent = 'Link kopieren'), 1500);
 });

@@ -24,11 +24,15 @@ sicher – für Tests mit echten Tablets muss die App aber über **HTTPS** errei
 
 ## Benutzung
 
-1. Host öffnet die Seite und klickt **Raum starten** (`/host`).
+1. Host öffnet die Seite und klickt **Raum starten** (`/host`) – die URL springt
+   auf `/CODE`. **Host-URL = Beitritts-URL**: Wer den Host-Token im Browser hat
+   (localStorage), bekommt unter `/CODE` die Regie, alle anderen den Stream.
 2. **Bildschirm teilen** klicken, Bildschirm/Fenster auswählen.
-   Für Ton: „Gesamter Bildschirm“ + „Systemaudio teilen“ anhaken.
-3. Tablets scannen den QR-Code (`/v/CODE`) – Stream startet automatisch,
-   Vollbild-Button unten rechts, Wake Lock hält das Display an.
+   Für Ton: Windows → „Gesamter Bildschirm“ + „Systemaudio teilen“;
+   macOS → „Chrome-Tab“ teilen (nur Tab-Ton).
+3. Tablets scannen den QR-Code (`/CODE`, alte `/v/CODE`-Links gehen weiter) –
+   Stream startet automatisch, Vollbild-Button unten rechts, Wake Lock hält das
+   Display an.
 4. Host sieht pro Tablet: Status, **Verbindungsweg (LOKAL / DIREKT / RELAY)**,
    Bitrate, fps, Paketverlust, Ping. Bei RELAY warnt die App – dann läuft das
    Video übers Internet statt lokal.
@@ -62,6 +66,9 @@ Es gibt keine Konfiguration außer `PORT` (Default 3000). Kein Build-Schritt.
   Gecaptured wird immer nativ; das Preset steuert Encoder-Skalierung und Bitrate pro Tablet
   und wirkt live ohne Neustart (Presets: `QUALITY_PRESETS` in `public/js/host.js`).
 - ICE nur mit STUN, **bewusst kein TURN** – damit Video nie unbemerkt übers Internet läuft.
-- Host-Reload behält den Raum (5 Min. Karenz), Tablets verbinden sich automatisch neu.
+- **Raum-Codes sind dauerhaft**: Der Host-Browser merkt sich Code + Token in
+  localStorage; existiert der Raum serverseitig nicht mehr (Deploy, Neustart,
+  Spin-Down), legt der Reclaim ihn mit demselben Code neu an. Tablets versuchen
+  es bei „Raum nicht aktiv“ automatisch alle 10 s erneut.
 - Kein SFU/Medienserver. Wenn 10 Tablets per P2P nicht stabil laufen, ist das die
   nächste Ausbaustufe.

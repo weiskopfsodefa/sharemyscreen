@@ -73,18 +73,25 @@ function handleHostCreate({ socket }) {
 }
 
 function handleHostReclaim({ socket, message }) {
-  const room = rooms.get(message.code);
-  if (!room || room.hostToken !== message.hostToken) {
+  const code = String(message.code || '').toUpperCase();
+  const hostToken = String(message.hostToken || '');
+  const valid = /^[A-Z0-9]{4,8}$/.test(code) && /^[a-f0-9]{32}$/.test(hostToken);
+  const existing = rooms.get(code);
+  if (!valid || (existing && existing.hostToken !== hostToken)) {
     send({ socket, message: { type: 'error', code: 'room-not-found' } });
     return;
   }
+  // Existiert der Raum nicht mehr (Server-Neustart), wird er mit demselben Code
+  // neu angelegt – Raum-Codes und gedruckte QR-Codes bleiben so dauerhaft gültig.
+  const room = existing ?? { hostSocket: socket, hostToken, viewers: new Map(), closeTimer: null };
+  rooms.set(code, room);
   if (room.closeTimer) {
     clearTimeout(room.closeTimer);
     room.closeTimer = null;
   }
   room.hostSocket = socket;
-  socket.meta = { role: 'host', code: message.code };
-  send({ socket, message: { type: 'host:created', code: message.code, hostToken: room.hostToken } });
+  socket.meta = { role: 'host', code };
+  send({ socket, message: { type: 'host:created', code, hostToken: room.hostToken } });
   broadcastToViewers({ room, message: { type: 'host:online' } });
   for (const [viewerId, viewerSocket] of room.viewers) {
     send({ socket, message: { type: 'viewer:joined', viewerId, name: viewerSocket.meta?.name ?? null } });
@@ -168,12 +175,14 @@ const MESSAGE_HANDLERS = {
 
 const ROUTE_FILES = {
   '/': 'index.html',
-  '/host': 'host.html',
+  '/host': 'room.html',
 };
 
 function resolveStaticFile({ urlPath }) {
   if (ROUTE_FILES[urlPath]) return path.join(PUBLIC_DIR, ROUTE_FILES[urlPath]);
-  if (/^\/v\/[A-Za-z0-9]+$/.test(urlPath)) return path.join(PUBLIC_DIR, 'viewer.html');
+  // /CODE ist Host UND Viewer (die Seite entscheidet per Token); /v/CODE bleibt
+  // für alte QR-Codes erhalten.
+  if (/^\/(?:v\/)?[A-Za-z0-9]{4,8}$/.test(urlPath)) return path.join(PUBLIC_DIR, 'room.html');
   const safePath = path.normalize(urlPath).replace(/^(\.\.[/\\])+/, '');
   const filePath = path.join(PUBLIC_DIR, safePath);
   if (!filePath.startsWith(PUBLIC_DIR)) return null;

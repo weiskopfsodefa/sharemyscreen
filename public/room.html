@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>sharemyscreen</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ffaa2b'/%3E%3Cpath d='M12 9.5v13l11-6.5z' fill='%230f0a06'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Spline+Sans+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <!-- Regie (Host) – sichtbar, wenn dieser Browser den Host-Token für den Raum besitzt -->
+  <div id="host-app" hidden>
+    <header class="topbar">
+      <a class="brand" href="/">share<b>my</b>screen<span class="tld">.de</span></a>
+      <span class="badge" id="onair-badge"><span class="led"></span><span id="onair-text">Bereit</span></span>
+    </header>
+
+    <main class="layout">
+      <div class="cards">
+        <section class="card">
+          <h2>Raum</h2>
+          <div class="room-code" id="room-code">––––––</div>
+          <div class="qr-frame"><img id="qr-img" width="240" height="240" alt="QR-Code zum Beitreten" hidden /></div>
+          <p class="join-url" id="join-url">Raum wird erstellt…</p>
+          <button class="btn btn-ghost" id="copy-link" disabled>Link kopieren</button>
+          <p class="hint">
+            Tablets scannen den QR-Code oder öffnen den Link – das ist dieselbe
+            Adresse wie oben in deiner Adresszeile.
+          </p>
+        </section>
+
+        <section class="card">
+          <h2>Übertragung</h2>
+          <button class="btn btn-primary" id="share-btn" disabled>▶&nbsp;&nbsp;Bildschirm teilen</button>
+          <button class="btn btn-danger" id="stop-btn" hidden>■&nbsp;&nbsp;Übertragung beenden</button>
+          <label class="select-row">
+            Qualität
+            <select id="quality-select"></select>
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" id="audio-checkbox" />
+            Laptop-Ton mitübertragen (experimentell)
+          </label>
+          <p class="hint" id="quality-hint"></p>
+          <p class="hint">
+            Für Ton: <b>Windows</b> → „Gesamter Bildschirm“ teilen und
+            „Systemaudio teilen“ anhaken. <b>macOS</b> → Chrome kann nur Tab-Ton:
+            „Chrome-Tab“ teilen. Fenster-Freigabe hat nie Ton.
+          </p>
+          <div class="alert warn" id="audio-alert">
+            ⚠ Im Stream ist <b>kein Ton</b> gelandet. Übertragung beenden und neu teilen:
+            unter Windows „Gesamter Bildschirm“ + Häkchen „Systemaudio teilen“,
+            unter macOS „Chrome-Tab“ wählen (Tab-Audio wird automatisch angeboten).
+          </div>
+          <video class="preview" id="preview" autoplay playsinline muted></video>
+        </section>
+      </div>
+
+      <div class="alert" id="relay-alert">
+        ⚠ Mindestens ein Tablet ist über ein Internet-Relay verbunden – das Video läuft
+        nicht lokal und kann ruckeln. WLAN prüfen (Client-Isolation am Router ausschalten).
+      </div>
+
+      <section class="card">
+        <h2>Tablets <span id="viewer-count"></span></h2>
+        <table class="viewers">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Gerät</th>
+              <th>Status</th>
+              <th>Weg</th>
+              <th>Bitrate</th>
+              <th>fps</th>
+              <th>Verlust</th>
+              <th>Ping</th>
+            </tr>
+          </thead>
+          <tbody id="viewer-rows">
+            <tr class="empty-row"><td colspan="8">Noch keine Tablets verbunden – QR-Code scannen.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <p class="statusline"><span class="led" id="ws-led"></span><span id="ws-status">Verbinde mit Server…</span></p>
+    </main>
+  </div>
+
+  <!-- Zuschauer (Tablet) -->
+  <div id="viewer-app" hidden>
+    <video id="stream" autoplay playsinline muted></video>
+
+    <div class="viewer-overlay" id="overlay">
+      <a class="brand" href="/">share<b>my</b>screen<span class="tld">.de</span></a>
+      <div class="viewer-status" id="status-text">Verbinde…</div>
+      <div class="viewer-substatus" id="substatus-text"></div>
+    </div>
+
+    <button class="tap-to-start" id="tap-to-start">
+      <span class="ring">▶</span>
+      <span class="label">Tippen zum Starten</span>
+    </button>
+
+    <span class="chip viewer-chip faded" id="path-chip"></span>
+
+    <button class="zoom-chip" id="zoom-chip" hidden title="Zoom zurücksetzen"></button>
+
+    <div class="viewer-controls faded" id="controls">
+      <button class="ctl-btn" id="rename-btn" title="Tablet benennen">✎</button>
+      <button class="ctl-btn" id="mute-btn" hidden title="Ton an/aus">🔇</button>
+      <button class="ctl-btn" id="fullscreen-btn" title="Vollbild">⛶</button>
+    </div>
+  </div>
+
+  <script type="module">
+    // Rollen-Weiche: Wer den Host-Token für diesen Raum besitzt (oder /host
+    // aufruft), bekommt die Regie – alle anderen werden Zuschauer.
+    const segment = location.pathname.split('/').pop().toUpperCase();
+    const code = /^[A-Z0-9]{4,8}$/.test(segment) && segment !== 'HOST' ? segment : null;
+    const isHost = !code || Boolean(localStorage.getItem(`sms-host:${code}`));
+    document.title = isHost ? 'Regie – sharemyscreen' : 'Zuschauer – sharemyscreen';
+    if (isHost) {
+      document.getElementById('host-app').hidden = false;
+      import('/js/host.js');
+    } else {
+      document.body.classList.add('viewer-page');
+      document.getElementById('viewer-app').hidden = false;
+      import('/js/viewer.js');
+    }
+  </script>
+</body>
+</html>

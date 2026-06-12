@@ -124,6 +124,26 @@ try {
   await waitFor({ socket: viewer, type: 'host:online' });
   console.log('✓ Host-Reclaim nach Reload funktioniert, Viewer-Liste bleibt erhalten');
 
+  // 6. Reclaim mit fremdem Token wird abgelehnt
+  const thief = await openSocket();
+  sendJson({ socket: thief, message: { type: 'host:reclaim', code: created.code, hostToken: 'f'.repeat(32) } });
+  const denied = await waitFor({ socket: thief, type: 'error' });
+  if (denied.code !== 'room-not-found') fail({ reason: 'Fremder Token wurde akzeptiert!' });
+  console.log('✓ Reclaim mit falschem Token wird abgelehnt');
+  thief.close();
+
+  // 7. Reclaim eines nicht (mehr) existierenden Raums legt ihn mit gleichem Code neu an
+  //    (Server-Neustart-Szenario: Host bringt Code + Token aus localStorage mit)
+  const phoenix = await openSocket();
+  const phoenixToken = 'ab'.repeat(16);
+  sendJson({ socket: phoenix, message: { type: 'host:reclaim', code: 'ZZZZ99', hostToken: phoenixToken } });
+  const revived = await waitFor({ socket: phoenix, type: 'host:created' });
+  if (revived.code !== 'ZZZZ99' || revived.hostToken !== phoenixToken) {
+    fail({ reason: 'Raum wurde nach Neustart nicht mit gleichem Code neu angelegt' });
+  }
+  console.log('✓ Raum-Code übersteht Server-Neustart (Reclaim legt Raum neu an)');
+  phoenix.close();
+
   host2.close();
   viewer.close();
   console.log('\nAlle Smoke-Tests bestanden.');
