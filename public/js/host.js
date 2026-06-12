@@ -171,6 +171,7 @@ function addViewer({ viewerId }) {
       stats: null,
       lastBytesSent: null,
       lastTimestamp: null,
+      pendingCandidates: [],
     };
     state.viewers.set(viewerId, viewer);
   }
@@ -197,6 +198,7 @@ async function connectViewer({ viewerId }) {
   viewer.status = 'verbindet…';
   viewer.stats = null;
   viewer.lastBytesSent = null;
+  viewer.pendingCandidates = [];
 
   for (const track of state.stream.getTracks()) {
     pc.addTrack(track, state.stream);
@@ -243,13 +245,22 @@ function applyBitrateLimit({ pc }) {
 }
 
 async function handleViewerSignal({ viewerId, payload }) {
-  const pc = state.viewers.get(viewerId)?.pc;
+  const viewer = state.viewers.get(viewerId);
+  const pc = viewer?.pc;
   if (!pc) return;
   try {
     if (payload.sdp) {
       await pc.setRemoteDescription(payload.sdp);
+      // Kandidaten nachschieben, die während setRemoteDescription eingetroffen sind.
+      for (const candidate of viewer.pendingCandidates.splice(0)) {
+        pc.addIceCandidate(candidate).catch(() => {});
+      }
     } else if (payload.candidate) {
-      await pc.addIceCandidate(payload.candidate);
+      if (pc.remoteDescription) {
+        await pc.addIceCandidate(payload.candidate);
+      } else {
+        viewer.pendingCandidates.push(payload.candidate);
+      }
     }
   } catch (err) {
     console.warn('Signal-Fehler', err);

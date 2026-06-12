@@ -24,9 +24,13 @@ const VIEWER_ID_KEY = `sms-viewer-${roomCode}`;
 const state = {
   viewerId: sessionStorage.getItem(VIEWER_ID_KEY) || null,
   pc: null,
+  // Kandidaten, die eintreffen, bevor setRemoteDescription fertig ist – sonst gehen
+  // ausgerechnet die zuerst gesendeten lokalen LAN-Kandidaten verloren.
+  pendingCandidates: [],
   wakeLock: null,
   rejoinTimer: null,
   fadeTimer: null,
+  stuckTimer: null,
 };
 
 function setStatus({ text, sub = '' }) {
@@ -86,8 +90,12 @@ const MESSAGE_HANDLERS = {
     const { payload } = message;
     if (payload.sdp) {
       await acceptOffer({ sdp: payload.sdp });
-    } else if (payload.candidate && state.pc) {
-      state.pc.addIceCandidate(payload.candidate).catch(() => {});
+    } else if (payload.candidate) {
+      if (state.pc?.remoteDescription) {
+        state.pc.addIceCandidate(payload.candidate).catch(() => {});
+      } else {
+        state.pendingCandidates.push(payload.candidate);
+      }
     }
   },
 };
@@ -98,7 +106,18 @@ async function acceptOffer({ sdp }) {
   teardownPeer();
   const pc = createPeerConnection();
   state.pc = pc;
+  state.pendingCandidates = [];
   setStatus({ text: 'Verbinde mit Host…', sub: `Raum ${roomCode}` });
+
+  clearTimeout(state.stuckTimer);
+  state.stuckTimer = setTimeout(() => {
+    if (state.pc === pc && pc.connectionState !== 'connected') {
+      setStatus({
+        text: 'Verbindung kommt nicht zustande',
+        sub: 'Häufige Ursachen: VPN am Host-Laptop aktiv, oder das WLAN blockiert Geräte-zu-Geräte-Verkehr (Client-/AP-Isolation am Router).',
+      });
+    }
+  }, 10_000);
 
   pc.ontrack = (event) => {
     const [stream] = event.streams;
@@ -116,6 +135,7 @@ async function acceptOffer({ sdp }) {
   pc.onconnectionstatechange = () => {
     if (state.pc !== pc) return;
     if (pc.connectionState === 'connected') {
+      clearTimeout(state.stuckTimer);
       ui.overlay.classList.add('hidden');
       requestWakeLock();
       showControls();
@@ -129,6 +149,9 @@ async function acceptOffer({ sdp }) {
   };
 
   await pc.setRemoteDescription(sdp);
+  for (const candidate of state.pendingCandidates.splice(0)) {
+    pc.addIceCandidate(candidate).catch(() => {});
+  }
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   signaling.send({ message: { type: 'signal', payload: { sdp: pc.localDescription } } });
