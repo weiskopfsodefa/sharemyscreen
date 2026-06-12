@@ -366,6 +366,13 @@ table.viewers td.name { font-family: var(--font-display); font-weight: 600; }
 
 .alert.visible { display: block; }
 
+.alert.warn {
+  border-color: rgba(255, 193, 77, 0.6);
+  background: rgba(255, 193, 77, 0.1);
+  color: #ffe3b3;
+  margin-top: 0.9rem;
+}
+
 .statusline {
   font-family: var(--font-mono);
   font-size: 0.75rem;

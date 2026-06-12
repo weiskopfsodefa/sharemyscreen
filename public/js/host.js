@@ -13,6 +13,8 @@ const QUALITY_PRESETS = {
 const DEFAULT_QUALITY = '720p15';
 const QUALITY_KEY = 'sms-quality';
 const CAPTURE_VIDEO = { frameRate: { ideal: 30, max: 30 } };
+// Sprachverarbeitung aus – die ist für Mikrofone gedacht und verstümmelt Systemaudio/Musik.
+const CAPTURE_AUDIO = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
 const STATS_INTERVAL_MS = 2000;
 const SESSION_KEY = 'sms-host-room';
 
@@ -26,6 +28,7 @@ const ui = {
   audioCheckbox: document.getElementById('audio-checkbox'),
   qualitySelect: document.getElementById('quality-select'),
   qualityHint: document.getElementById('quality-hint'),
+  audioAlert: document.getElementById('audio-alert'),
   preview: document.getElementById('preview'),
   onairBadge: document.getElementById('onair-badge'),
   onairText: document.getElementById('onair-text'),
@@ -133,12 +136,17 @@ async function startShare() {
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
       video: CAPTURE_VIDEO,
-      audio: ui.audioCheckbox.checked,
+      audio: ui.audioCheckbox.checked ? CAPTURE_AUDIO : false,
+      systemAudio: 'include',
     });
   } catch {
     return; // Nutzer hat den Dialog abgebrochen.
   }
   state.stream = stream;
+  ui.audioAlert.classList.toggle(
+    'visible',
+    ui.audioCheckbox.checked && stream.getAudioTracks().length === 0,
+  );
   const [videoTrack] = stream.getVideoTracks();
   videoTrack.contentHint = 'detail';
   videoTrack.addEventListener('ended', stopShare);
@@ -166,6 +174,7 @@ function stopShare() {
   }
   ui.preview.srcObject = null;
   ui.preview.classList.remove('visible');
+  ui.audioAlert.classList.remove('visible');
   ui.shareBtn.hidden = false;
   ui.stopBtn.hidden = true;
   ui.onairBadge.classList.remove('onair');

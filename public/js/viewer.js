@@ -158,9 +158,11 @@ async function acceptOffer({ sdp }) {
     const [stream] = event.streams;
     if (ui.video.srcObject !== stream) {
       ui.video.srcObject = stream;
-      ui.muteBtn.hidden = stream.getAudioTracks().length === 0;
       playVideo();
     }
+    // Pro Spur neu prüfen: ontrack feuert für Video und Audio einzeln,
+    // beim ersten Event ist die Audiospur evtl. noch nicht im Stream.
+    ui.muteBtn.hidden = stream.getAudioTracks().length === 0;
   };
   pc.onicecandidate = (event) => {
     if (event.candidate) {
