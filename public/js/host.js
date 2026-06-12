@@ -1,12 +1,18 @@
 import { SignalingClient } from './signaling.js';
 import { createPeerConnection, readConnectionStats, formatBitrate, PATH_LABELS } from './webrtc.js';
 
-const TARGET_VIDEO = {
-  width: { ideal: 1280 },
-  height: { ideal: 720 },
-  frameRate: { ideal: 15, max: 15 },
+// Es wird immer in nativer Auflösung gecaptured; das Preset steuert pro Verbindung
+// die Encoder-Skalierung und Bitrate – Wechsel wirkt dadurch live, ohne Neustart.
+const QUALITY_PRESETS = {
+  '540p15': { label: '540p · 15 fps – sparsam', height: 540, maxFramerate: 15, maxBitrate: 700_000 },
+  '720p15': { label: '720p · 15 fps – Standard', height: 720, maxFramerate: 15, maxBitrate: 1_200_000 },
+  '1080p15': { label: '1080p · 15 fps', height: 1080, maxFramerate: 15, maxBitrate: 2_500_000 },
+  '1080p30': { label: '1080p · 30 fps', height: 1080, maxFramerate: 30, maxBitrate: 4_000_000 },
+  source: { label: 'Quelle (nativ) · 30 fps', height: null, maxFramerate: 30, maxBitrate: 6_000_000 },
 };
-const MAX_BITRATE_BPS = 1_200_000;
+const DEFAULT_QUALITY = '720p15';
+const QUALITY_KEY = 'sms-quality';
+const CAPTURE_VIDEO = { frameRate: { ideal: 30, max: 30 } };
 const STATS_INTERVAL_MS = 2000;
 const SESSION_KEY = 'sms-host-room';
 
@@ -18,6 +24,8 @@ const ui = {
   shareBtn: document.getElementById('share-btn'),
   stopBtn: document.getElementById('stop-btn'),
   audioCheckbox: document.getElementById('audio-checkbox'),
+  qualitySelect: document.getElementById('quality-select'),
+  qualityHint: document.getElementById('quality-hint'),
   preview: document.getElementById('preview'),
   onairBadge: document.getElementById('onair-badge'),
   onairText: document.getElementById('onair-text'),
@@ -118,7 +126,7 @@ async function startShare() {
   let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({
-      video: TARGET_VIDEO,
+      video: CAPTURE_VIDEO,
       audio: ui.audioCheckbox.checked,
     });
   } catch {
@@ -203,7 +211,7 @@ async function connectViewer({ viewerId }) {
   for (const track of state.stream.getTracks()) {
     pc.addTrack(track, state.stream);
   }
-  applyBitrateLimit({ pc });
+  applyQuality({ pc });
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
@@ -220,6 +228,10 @@ async function connectViewer({ viewerId }) {
       closed: 'getrennt',
     };
     viewer.status = stateMap[pc.connectionState] ?? viewer.status;
+    if (pc.connectionState === 'connected') {
+      // Nach der Verhandlung erneut anwenden – vorher kann setParameters scheitern.
+      applyQuality({ pc });
+    }
     if (pc.connectionState === 'failed') {
       pc.close();
       viewer.pc = null;
@@ -234,14 +246,56 @@ async function connectViewer({ viewerId }) {
   renderViewers();
 }
 
-function applyBitrateLimit({ pc }) {
+function currentPreset() {
+  return QUALITY_PRESETS[ui.qualitySelect.value] ?? QUALITY_PRESETS[DEFAULT_QUALITY];
+}
+
+function applyQuality({ pc }) {
+  const preset = currentPreset();
   for (const sender of pc.getSenders()) {
     if (sender.track?.kind !== 'video') continue;
+    const captureHeight = sender.track.getSettings().height;
+    const scale = preset.height && captureHeight ? Math.max(1, captureHeight / preset.height) : 1;
     const params = sender.getParameters();
-    params.encodings = [{ maxBitrate: MAX_BITRATE_BPS, maxFramerate: TARGET_VIDEO.frameRate.max }];
+    if (!params.encodings?.length) params.encodings = [{}];
+    Object.assign(params.encodings[0], {
+      maxBitrate: preset.maxBitrate,
+      maxFramerate: preset.maxFramerate,
+      scaleResolutionDownBy: scale,
+    });
     params.degradationPreference = 'maintain-resolution';
     sender.setParameters(params).catch(() => {});
   }
+}
+
+function applyQualityToAll() {
+  for (const viewer of state.viewers.values()) {
+    if (viewer.pc) applyQuality({ pc: viewer.pc });
+  }
+}
+
+function renderQualityHint() {
+  const preset = currentPreset();
+  ui.qualityHint.textContent =
+    `Max. ${formatBitrate({ bits: preset.maxBitrate })} pro Tablet – Gesamtlast im WLAN ist ` +
+    '„pro Tablet × Anzahl Tablets“. Wechsel wirkt sofort, ohne die Übertragung neu zu starten.';
+}
+
+function initQualitySelect() {
+  for (const [key, preset] of Object.entries(QUALITY_PRESETS)) {
+    const option = document.createElement('option');
+    option.value = key;
+    option.textContent = preset.label;
+    ui.qualitySelect.append(option);
+  }
+  const saved = localStorage.getItem(QUALITY_KEY);
+  ui.qualitySelect.value = QUALITY_PRESETS[saved] ? saved : DEFAULT_QUALITY;
+  ui.qualitySelect.addEventListener('change', () => {
+    localStorage.setItem(QUALITY_KEY, ui.qualitySelect.value);
+    applyQualityToAll();
+    renderQualityHint();
+  });
+  renderQualityHint();
 }
 
 async function handleViewerSignal({ viewerId, payload }) {
@@ -316,4 +370,5 @@ function renderViewers() {
     .join('');
 }
 
+initQualitySelect();
 signaling.connect();

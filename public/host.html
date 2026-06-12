@@ -31,14 +31,18 @@
         <h2>Übertragung</h2>
         <button class="btn btn-primary" id="share-btn" disabled>▶&nbsp;&nbsp;Bildschirm teilen</button>
         <button class="btn btn-danger" id="stop-btn" hidden>■&nbsp;&nbsp;Übertragung beenden</button>
+        <label class="select-row">
+          Qualität
+          <select id="quality-select"></select>
+        </label>
         <label class="checkbox-row">
           <input type="checkbox" id="audio-checkbox" />
           Laptop-Ton mitübertragen (experimentell)
         </label>
+        <p class="hint" id="quality-hint"></p>
         <p class="hint">
           Für Ton: im Auswahl-Dialog „Gesamter Bildschirm“ wählen und
-          „Systemaudio teilen“ anhaken. Ziel: 1280×720, 15&nbsp;fps,
-          max. 1,2&nbsp;Mbit/s pro Tablet.
+          „Systemaudio teilen“ anhaken.
         </p>
         <video class="preview" id="preview" autoplay playsinline muted></video>
       </section>

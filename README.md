@@ -58,7 +58,9 @@ Es gibt keine Konfiguration außer `PORT` (Default 3000). Kein Build-Schritt.
 
 ## Technik / Grenzen (MVP)
 
-- Ziel: 720p, 15 fps, max. 1,2 Mbit/s pro Tablet (im Code: `MAX_BITRATE_BPS` in `public/js/host.js`).
+- Qualität per Dropdown auf der Host-Seite: 540p bis „Quelle (nativ)“, Standard 720p/15fps.
+  Gecaptured wird immer nativ; das Preset steuert Encoder-Skalierung und Bitrate pro Tablet
+  und wirkt live ohne Neustart (Presets: `QUALITY_PRESETS` in `public/js/host.js`).
 - ICE nur mit STUN, **bewusst kein TURN** – damit Video nie unbemerkt übers Internet läuft.
 - Host-Reload behält den Raum (5 Min. Karenz), Tablets verbinden sich automatisch neu.
 - Kein SFU/Medienserver. Wenn 10 Tablets per P2P nicht stabil laufen, ist das die

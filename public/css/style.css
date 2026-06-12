@@ -271,7 +271,8 @@ input[type='text'] {
 input[type='text']:focus { border-color: var(--amber); }
 input[type='text']::placeholder { color: var(--ink-dim); opacity: 0.6; letter-spacing: 0.1em; }
 
-.checkbox-row {
+.checkbox-row,
+.select-row {
   display: flex;
   align-items: center;
   gap: 0.55rem;
@@ -281,6 +282,19 @@ input[type='text']::placeholder { color: var(--ink-dim); opacity: 0.6; letter-sp
 }
 
 .checkbox-row input { accent-color: var(--amber); width: 17px; height: 17px; }
+
+select {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 0.5rem 0.8rem;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--ink);
+  outline: none;
+}
+
+select:focus { border-color: var(--amber); }
 
 .hint {
   font-size: 0.82rem;
