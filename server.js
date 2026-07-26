@@ -16,6 +16,21 @@ const HEARTBEAT_INTERVAL_MS = 15_000;
 const MAX_VIEWERS_PER_ROOM = 20;
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const CODE_LENGTH = 6;
+const MAX_WS_PAYLOAD_BYTES = 64 * 1024;
+
+// Ohne festes Secret sind Tokens nur bis zum nächsten Neustart gültig –
+// Raum-Codes (und gedruckte QR-Codes) überleben den Neustart dann nicht.
+const HOST_TOKEN_SECRET = process.env.HOST_TOKEN_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.HOST_TOKEN_SECRET) {
+  console.warn('HOST_TOKEN_SECRET ist nicht gesetzt – Raum-Codes überleben keinen Server-Neustart.');
+}
+
+// Host-Tokens sind per HMAC an den Raum-Code gebunden. Nur der Server kann gültige
+// Tokens ausstellen – niemand kann einen fremden (z. B. gedruckten) Code nach einem
+// Server-Neustart mit einem selbst gewählten Token kapern.
+function hostTokenFor({ code }) {
+  return crypto.createHmac('sha256', HOST_TOKEN_SECRET).update(code).digest('hex').slice(0, 32);
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -28,7 +43,7 @@ const MIME_TYPES = {
   '.woff2': 'font/woff2',
 };
 
-/** @type {Map<string, {hostSocket: import('ws').WebSocket|null, hostToken: string, viewers: Map<string, import('ws').WebSocket>, closeTimer: NodeJS.Timeout|null}>} */
+/** @type {Map<string, {hostSocket: import('ws').WebSocket|null, viewers: Map<string, import('ws').WebSocket>, closeTimer: NodeJS.Timeout|null}>} */
 const rooms = new Map();
 
 function generateRoomCode() {
@@ -65,25 +80,31 @@ function scheduleRoomClose({ code }) {
 // --- Signaling-Nachrichten ---
 
 function handleHostCreate({ socket }) {
+  // Hängt der Socket noch in einem alten Raum, diesen sauber verlassen –
+  // sonst bleibt der alte Raum für immer verwaist in der Map.
+  handleDisconnect({ socket });
   const code = generateRoomCode();
-  const hostToken = crypto.randomBytes(16).toString('hex');
-  rooms.set(code, { hostSocket: socket, hostToken, viewers: new Map(), closeTimer: null });
+  rooms.set(code, { hostSocket: socket, viewers: new Map(), closeTimer: null });
   socket.meta = { role: 'host', code };
-  send({ socket, message: { type: 'host:created', code, hostToken } });
+  send({ socket, message: { type: 'host:created', code, hostToken: hostTokenFor({ code }) } });
 }
 
 function handleHostReclaim({ socket, message }) {
   const code = String(message.code || '').toUpperCase();
   const hostToken = String(message.hostToken || '');
-  const valid = /^[A-Z0-9]{4,8}$/.test(code) && /^[a-f0-9]{32}$/.test(hostToken);
-  const existing = rooms.get(code);
-  if (!valid || (existing && existing.hostToken !== hostToken)) {
+  const expected = /^[A-Z0-9]{4,8}$/.test(code) ? hostTokenFor({ code }) : null;
+  const tokenOk = expected !== null && hostToken.length === expected.length &&
+    crypto.timingSafeEqual(Buffer.from(hostToken), Buffer.from(expected));
+  if (!tokenOk) {
     send({ socket, message: { type: 'error', code: 'room-not-found' } });
     return;
   }
+  if (socket.meta && (socket.meta.role !== 'host' || socket.meta.code !== code)) {
+    handleDisconnect({ socket });
+  }
   // Existiert der Raum nicht mehr (Server-Neustart), wird er mit demselben Code
   // neu angelegt – Raum-Codes und gedruckte QR-Codes bleiben so dauerhaft gültig.
-  const room = existing ?? { hostSocket: socket, hostToken, viewers: new Map(), closeTimer: null };
+  const room = rooms.get(code) ?? { hostSocket: socket, viewers: new Map(), closeTimer: null };
   rooms.set(code, room);
   if (room.closeTimer) {
     clearTimeout(room.closeTimer);
@@ -91,10 +112,12 @@ function handleHostReclaim({ socket, message }) {
   }
   room.hostSocket = socket;
   socket.meta = { role: 'host', code };
-  send({ socket, message: { type: 'host:created', code, hostToken: room.hostToken } });
+  send({ socket, message: { type: 'host:created', code, hostToken } });
   broadcastToViewers({ room, message: { type: 'host:online' } });
   for (const [viewerId, viewerSocket] of room.viewers) {
-    send({ socket, message: { type: 'viewer:joined', viewerId, name: viewerSocket.meta?.name ?? null } });
+    // Bekannte Viewer haben evtl. noch laufende P2P-Verbindungen – kein neues
+    // Angebot erzwingen, sonst wird deren Bild grundlos kurz schwarz.
+    send({ socket, message: { type: 'viewer:joined', viewerId, name: viewerSocket.meta?.name ?? null, needsOffer: false } });
   }
 }
 
@@ -111,7 +134,12 @@ function handleViewerJoin({ socket, message }) {
     send({ socket, message: { type: 'error', code: 'room-not-found' } });
     return;
   }
-  const viewerId = message.viewerId || crypto.randomBytes(4).toString('hex');
+  if (socket.meta && (socket.meta.role !== 'viewer' || socket.meta.code !== code)) {
+    handleDisconnect({ socket });
+  }
+  const viewerId = typeof message.viewerId === 'string' && /^[a-f0-9]{8}$/.test(message.viewerId)
+    ? message.viewerId
+    : crypto.randomBytes(4).toString('hex');
   const isRejoin = room.viewers.has(viewerId);
   if (!isRejoin && room.viewers.size >= MAX_VIEWERS_PER_ROOM) {
     send({ socket, message: { type: 'error', code: 'room-full' } });
@@ -121,7 +149,7 @@ function handleViewerJoin({ socket, message }) {
   room.viewers.set(viewerId, socket);
   socket.meta = { role: 'viewer', code, viewerId, name };
   send({ socket, message: { type: 'viewer:joined', viewerId, hostOnline: Boolean(room.hostSocket) } });
-  send({ socket: room.hostSocket, message: { type: 'viewer:joined', viewerId, name } });
+  send({ socket: room.hostSocket, message: { type: 'viewer:joined', viewerId, name, needsOffer: message.needsOffer !== false } });
 }
 
 function handleViewerRename({ socket, message }) {
@@ -208,8 +236,18 @@ function serveQrCode({ url, res }) {
 }
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url, 'http://localhost');
-  const urlPath = decodeURIComponent(url.pathname);
+  let url;
+  let urlPath;
+  try {
+    url = new URL(req.url, 'http://localhost');
+    urlPath = decodeURIComponent(url.pathname);
+  } catch {
+    // Kaputte URLs (z. B. ungültiges Percent-Encoding von Scanner-Bots) werfen hier –
+    // ohne catch würde eine einzige solche Anfrage den ganzen Prozess beenden.
+    res.writeHead(400);
+    res.end('Bad Request');
+    return;
+  }
   if (urlPath === '/qr.svg') {
     serveQrCode({ url, res });
     return;
@@ -237,10 +275,14 @@ const server = http.createServer((req, res) => {
 
 // --- WebSocket-Signaling ---
 
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_WS_PAYLOAD_BYTES });
+
+wss.on('error', (err) => console.error('WebSocket-Server-Fehler', err));
 
 wss.on('connection', (socket) => {
   socket.isAlive = true;
+  // Ohne Listener würde ein 'error'-Event (z. B. ein kaputter Frame) den Prozess beenden.
+  socket.on('error', () => {});
   socket.on('pong', () => {
     socket.isAlive = true;
   });

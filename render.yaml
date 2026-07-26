@@ -7,3 +7,8 @@ services:
     buildCommand: npm ci
     startCommand: node server.js
     healthCheckPath: /
+    envVars:
+      # Signiert die Host-Tokens – muss über Neustarts stabil bleiben, sonst
+      # verlieren Hosts ihre dauerhaften Raum-Codes.
+      - key: HOST_TOKEN_SECRET
+        generateValue: true

@@ -86,7 +86,15 @@ function deviceName() {
 
 function joinRoom() {
   signaling.send({
-    message: { type: 'viewer:join', code: roomCode, viewerId: state.viewerId, name: deviceName() },
+    message: {
+      type: 'viewer:join',
+      code: roomCode,
+      viewerId: state.viewerId,
+      name: deviceName(),
+      // Läuft die P2P-Verbindung noch (z. B. WS-Reconnect nach Server-Neustart),
+      // braucht der Host kein neues Angebot zu schicken – das Bild bliebe sonst kurz schwarz.
+      needsOffer: state.pc?.connectionState !== 'connected',
+    },
   });
 }
 
@@ -107,6 +115,13 @@ const MESSAGE_HANDLERS = {
     clearTimeout(state.joinRetryTimer);
     state.viewerId = message.viewerId;
     sessionStorage.setItem(VIEWER_ID_KEY, message.viewerId);
+    // Läuft das Video bereits (Rejoin nach Server-Neustart bei intakter P2P-Verbindung),
+    // wird ohne Neuverhandlung kein 'connected'-Event mehr feuern – den Overlay, den
+    // ein zwischenzeitliches „Raum nicht aktiv“ gezeigt hat, hier explizit verstecken.
+    if (state.pc?.connectionState === 'connected') {
+      ui.overlay.classList.add('hidden');
+      return;
+    }
     if (!state.pc) {
       setStatus({
         text: message.hostOnline === false ? 'Host ist offline' : 'Warten auf Übertragung…',
@@ -115,7 +130,11 @@ const MESSAGE_HANDLERS = {
     }
   },
   'host:online': () => {
-    if (!state.pc) setStatus({ text: 'Warten auf Übertragung…', sub: `Raum ${roomCode}` });
+    if (state.pc?.connectionState === 'connected') return;
+    setStatus({ text: 'Warten auf Übertragung…', sub: `Raum ${roomCode}` });
+    // Erneut beitreten: Der zurückgekehrte Host erfährt so per needsOffer, dass dieses
+    // Tablet (im Gegensatz zu weiterlaufenden) ein neues Angebot braucht.
+    joinRoom();
   },
   'host:offline': () => {
     if (!state.pc) setStatus({ text: 'Host ist offline', sub: 'Warten auf erneute Verbindung…' });
@@ -127,7 +146,11 @@ const MESSAGE_HANDLERS = {
   },
   error: ({ message }) => {
     if (message.code === 'room-not-found') {
-      setStatus({ text: 'Raum nicht aktiv', sub: `Warte auf Raum „${roomCode}“ – verbinde automatisch…` });
+      // Passiert auch bei laufendem Video (Server neu gestartet, Host noch nicht
+      // zurück) – dann kein Status-Overlay über den funktionierenden Stream legen.
+      if (state.pc?.connectionState !== 'connected') {
+        setStatus({ text: 'Raum nicht aktiv', sub: `Warte auf Raum „${roomCode}“ – verbinde automatisch…` });
+      }
       scheduleJoinRetry();
     } else if (message.code === 'room-full') {
       setStatus({ text: 'Raum ist voll', sub: 'Maximale Anzahl Tablets erreicht.' });

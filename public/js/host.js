@@ -100,7 +100,8 @@ const MESSAGE_HANDLERS = {
     }
     renderRoom();
   },
-  'viewer:joined': ({ message }) => addViewer({ viewerId: message.viewerId, name: message.name }),
+  'viewer:joined': ({ message }) =>
+    addViewer({ viewerId: message.viewerId, name: message.name, needsOffer: message.needsOffer !== false }),
   'viewer:left': ({ message }) => removeViewer({ viewerId: message.viewerId }),
   'viewer:renamed': ({ message }) => {
     const viewer = state.viewers.get(message.viewerId);
@@ -195,7 +196,7 @@ function stopShare() {
 
 // --- Pro Tablet eine eigene WebRTC-Verbindung (P2P-Fanout) ---
 
-function addViewer({ viewerId, name }) {
+function addViewer({ viewerId, name, needsOffer = true }) {
   let viewer = state.viewers.get(viewerId);
   if (!viewer) {
     viewer = {
@@ -212,7 +213,12 @@ function addViewer({ viewerId, name }) {
   } else if (name) {
     viewer.name = name;
   }
-  if (state.stream) {
+  // needsOffer=false heißt: die P2P-Verbindung des Tablets läuft noch (z. B. nach
+  // Server-Neustart) – nicht neu verhandeln, sonst wird das Bild grundlos schwarz.
+  // Das gilt aber nur, solange hier auch eine lebende Verbindung existiert: Nach einem
+  // viewer:left hat der Host sie geschlossen, während das Tablet das erst nach bis zu
+  // ~30 s (ICE-Consent-Timeout) bemerkt und bis dahin fälschlich needsOffer=false meldet.
+  if (state.stream && (needsOffer || !viewer.pc)) {
     connectViewer({ viewerId });
   }
   renderViewers();

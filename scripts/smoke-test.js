@@ -3,10 +3,18 @@
 // Aufruf: npm run smoke-test (startet eigenen Server auf Port 3199)
 
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import WebSocket from 'ws';
 
 const PORT = 3199;
 const URL = `ws://localhost:${PORT}/ws`;
+const SECRET = 'smoke-test-secret';
+
+// Gleiche Ableitung wie im Server – damit kann der Test gültige Tokens für das
+// Server-Neustart-Szenario erzeugen (Raum existiert nicht mehr, Token schon).
+function hostTokenFor({ code }) {
+  return crypto.createHmac('sha256', SECRET).update(code).digest('hex').slice(0, 32);
+}
 
 function fail({ reason }) {
   console.error(`✗ ${reason}`);
@@ -52,7 +60,7 @@ function sendJson({ socket, message }) {
 }
 
 const server = spawn('node', ['server.js'], {
-  env: { ...process.env, PORT: String(PORT) },
+  env: { ...process.env, PORT: String(PORT), HOST_TOKEN_SECRET: SECRET },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 
@@ -72,12 +80,17 @@ try {
   if (!/^[A-Z2-9]{6}$/.test(created.code)) fail({ reason: `Ungültiger Raumcode: ${created.code}` });
   console.log(`✓ Raum erstellt: ${created.code}`);
 
-  // 2. Viewer tritt mit Gerätenamen bei
+  // 2. Viewer tritt mit Gerätenamen bei; selbst gewählte, ungültige viewerId wird ersetzt
   const viewer = await openSocket();
-  sendJson({ socket: viewer, message: { type: 'viewer:join', code: created.code, name: 'Tablet Theke\u0007' } });
+  sendJson({
+    socket: viewer,
+    message: { type: 'viewer:join', code: created.code, viewerId: '<böse-id>', name: 'Tablet Theke\u0007' },
+  });
   const joined = await waitFor({ socket: viewer, type: 'viewer:joined' });
   const hostNotified = await waitFor({ socket: host, type: 'viewer:joined' });
   if (hostNotified.viewerId !== joined.viewerId) fail({ reason: 'Viewer-IDs stimmen nicht überein' });
+  if (!/^[a-f0-9]{8}$/.test(joined.viewerId)) fail({ reason: `Ungültige viewerId übernommen: ${joined.viewerId}` });
+  if (hostNotified.needsOffer !== true) fail({ reason: 'needsOffer wurde nicht an den Host durchgereicht' });
   if (hostNotified.name !== 'Tablet Theke') fail({ reason: `Name nicht/falsch übermittelt: ${hostNotified.name}` });
   console.log(`✓ Viewer beigetreten: ${joined.viewerId} („${hostNotified.name}“, Steuerzeichen entfernt)`);
 
@@ -121,6 +134,7 @@ try {
   if (reclaimed.code !== created.code) fail({ reason: 'Reclaim lieferte falschen Raum' });
   const rejoinNotice = await waitFor({ socket: host2, type: 'viewer:joined' });
   if (rejoinNotice.viewerId !== joined.viewerId) fail({ reason: 'Bestehender Viewer fehlt nach Reclaim' });
+  if (rejoinNotice.needsOffer !== false) fail({ reason: 'Reclaim-Replay muss needsOffer:false markieren' });
   await waitFor({ socket: viewer, type: 'host:online' });
   console.log('✓ Host-Reclaim nach Reload funktioniert, Viewer-Liste bleibt erhalten');
 
@@ -132,17 +146,28 @@ try {
   console.log('✓ Reclaim mit falschem Token wird abgelehnt');
   thief.close();
 
-  // 7. Reclaim eines nicht (mehr) existierenden Raums legt ihn mit gleichem Code neu an
-  //    (Server-Neustart-Szenario: Host bringt Code + Token aus localStorage mit)
+  // 7. Reclaim eines nicht (mehr) existierenden Raums legt ihn mit gleichem Code neu an –
+  //    aber nur mit korrekt signiertem Token (Server-Neustart-Szenario: Host bringt
+  //    Code + Token aus localStorage mit; Fremde können den Code nicht kapern)
   const phoenix = await openSocket();
-  const phoenixToken = 'ab'.repeat(16);
+  sendJson({ socket: phoenix, message: { type: 'host:reclaim', code: 'ZZZZ99', hostToken: 'ab'.repeat(16) } });
+  const forged = await waitFor({ socket: phoenix, type: 'error' });
+  if (forged.code !== 'room-not-found') fail({ reason: 'Unsignierter Token wurde akzeptiert!' });
+  const phoenixToken = hostTokenFor({ code: 'ZZZZ99' });
   sendJson({ socket: phoenix, message: { type: 'host:reclaim', code: 'ZZZZ99', hostToken: phoenixToken } });
   const revived = await waitFor({ socket: phoenix, type: 'host:created' });
   if (revived.code !== 'ZZZZ99' || revived.hostToken !== phoenixToken) {
     fail({ reason: 'Raum wurde nach Neustart nicht mit gleichem Code neu angelegt' });
   }
-  console.log('✓ Raum-Code übersteht Server-Neustart (Reclaim legt Raum neu an)');
+  console.log('✓ Raum-Code übersteht Server-Neustart (nur mit signiertem Token)');
   phoenix.close();
+
+  // 8. Kaputte URLs (ungültiges Percent-Encoding) dürfen den Server nicht beenden
+  const bad = await fetch(`http://localhost:${PORT}/%zz`);
+  if (bad.status !== 400) fail({ reason: `Kaputte URL: erwartete 400, bekam ${bad.status}` });
+  const alive = await fetch(`http://localhost:${PORT}/`);
+  if (alive.status !== 200) fail({ reason: 'Server nach kaputter URL nicht mehr erreichbar' });
+  console.log('✓ Kaputte URL wird mit 400 beantwortet, Server läuft weiter');
 
   host2.close();
   viewer.close();

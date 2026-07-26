@@ -50,7 +50,11 @@ fly deploy
 # Danach eigene Domain (sharemyscreen.de) als Custom Domain + Zertifikat hinzufügen
 ```
 
-Es gibt keine Konfiguration außer `PORT` (Default 3000). Kein Build-Schritt.
+Konfiguration: `PORT` (Default 3000) und `HOST_TOKEN_SECRET` (beliebige zufällige
+Zeichenkette). Das Secret signiert die Host-Tokens – es muss über Neustarts stabil
+bleiben, sonst verlieren Hosts ihre dauerhaften Raum-Codes. `render.yaml` erzeugt es
+automatisch (`generateValue`); bei manuell angelegten Diensten in der Umgebungs-Konfiguration
+des Anbieters setzen. Kein Build-Schritt.
 
 ## Empfehlung fürs Event
 
@@ -69,6 +73,8 @@ Es gibt keine Konfiguration außer `PORT` (Default 3000). Kein Build-Schritt.
 - **Raum-Codes sind dauerhaft**: Der Host-Browser merkt sich Code + Token in
   localStorage; existiert der Raum serverseitig nicht mehr (Deploy, Neustart,
   Spin-Down), legt der Reclaim ihn mit demselben Code neu an. Tablets versuchen
-  es bei „Raum nicht aktiv“ automatisch alle 10 s erneut.
+  es bei „Raum nicht aktiv“ automatisch alle 10 s erneut. Host-Tokens sind per
+  HMAC mit `HOST_TOKEN_SECRET` signiert – fremde Clients können einen (z. B.
+  gedruckten) Code nach einem Neustart nicht übernehmen.
 - Kein SFU/Medienserver. Wenn 10 Tablets per P2P nicht stabil laufen, ist das die
   nächste Ausbaustufe.
