@@ -17,7 +17,6 @@ const ui = {
   zoomChip: document.getElementById('zoom-chip'),
   pathChip: document.getElementById('path-chip'),
   controls: document.getElementById('controls'),
-  muteBtn: document.getElementById('mute-btn'),
   fullscreenBtn: document.getElementById('fullscreen-btn'),
 };
 
@@ -195,9 +194,6 @@ async function acceptOffer({ sdp }) {
       ui.video.srcObject = stream;
       playVideo();
     }
-    // Pro Spur neu prüfen: ontrack feuert für Video und Audio einzeln,
-    // beim ersten Event ist die Audiospur evtl. noch nicht im Stream.
-    ui.muteBtn.hidden = stream.getAudioTracks().length === 0;
   };
   pc.onicecandidate = (event) => {
     if (event.candidate) {
@@ -256,12 +252,7 @@ ui.tapToStart.addEventListener('click', () => {
   playVideo();
 });
 
-// --- Ton, Vollbild, Wake Lock ---
-
-ui.muteBtn.addEventListener('click', () => {
-  ui.video.muted = !ui.video.muted;
-  ui.muteBtn.textContent = ui.video.muted ? '🔇' : '🔊';
-});
+// --- Vollbild, Wake Lock ---
 
 ui.fullscreenBtn.addEventListener('click', async () => {
   if (document.fullscreenElement) {

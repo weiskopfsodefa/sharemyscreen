@@ -7,7 +7,7 @@ Der Server macht nur UI, Raumverwaltung und Signaling – er überträgt kein Vi
 ```
 Website laden:        Internet
 Signaling/WebSocket:  Internet, geringe Bandbreite
-Video/Audio:          P2P im WLAN (Host -> jedes Tablet einzeln)
+Video:                P2P im WLAN (Host -> jedes Tablet einzeln)
 ```
 
 ## Lokal starten
@@ -28,8 +28,6 @@ sicher – für Tests mit echten Tablets muss die App aber über **HTTPS** errei
    auf `/CODE`. **Host-URL = Beitritts-URL**: Wer den Host-Token im Browser hat
    (localStorage), bekommt unter `/CODE` die Regie, alle anderen den Stream.
 2. **Bildschirm teilen** klicken, Bildschirm/Fenster auswählen.
-   Für Ton: Windows → „Gesamter Bildschirm“ + „Systemaudio teilen“;
-   macOS → „Chrome-Tab“ teilen (nur Tab-Ton).
 3. Tablets scannen den QR-Code (`/CODE`, alte `/v/CODE`-Links gehen weiter) –
    Stream startet automatisch, Vollbild-Button unten rechts, Wake Lock hält das
    Display an.

@@ -4,7 +4,7 @@ import { createPeerConnection, readConnectionStats, formatBitrate, PATH_LABELS }
 // Es wird immer in nativer Auflösung gecaptured; das Preset steuert pro Verbindung
 // die Encoder-Skalierung und Bitrate – Wechsel wirkt dadurch live, ohne Neustart.
 const QUALITY_PRESETS = {
-  auto: { label: 'Automatisch – erst fps, dann Auflösung', auto: true },
+  auto: { label: 'Automatisch', auto: true },
   '540p15': { label: '540p · 15 fps – sparsam', height: 540, maxFramerate: 15, maxBitrate: 700_000 },
   '720p15': { label: '720p · 15 fps', height: 720, maxFramerate: 15, maxBitrate: 1_200_000 },
   '1080p15': { label: '1080p · 15 fps', height: 1080, maxFramerate: 15, maxBitrate: 2_500_000 },
@@ -35,8 +35,6 @@ const AUTO_RETRY_MS = 30_000;
 const AUTO_RETRY_MAX_MS = 300_000;
 const QUALITY_KEY = 'sms-quality';
 const CAPTURE_VIDEO = { frameRate: { ideal: 30, max: 30 } };
-// Sprachverarbeitung aus – die ist für Mikrofone gedacht und verstümmelt Systemaudio/Musik.
-const CAPTURE_AUDIO = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
 const STATS_INTERVAL_MS = 2000;
 const LAST_ROOM_KEY = 'sms-host:last';
 
@@ -57,10 +55,8 @@ const ui = {
   copyLink: document.getElementById('copy-link'),
   shareBtn: document.getElementById('share-btn'),
   stopBtn: document.getElementById('stop-btn'),
-  audioCheckbox: document.getElementById('audio-checkbox'),
   qualitySelect: document.getElementById('quality-select'),
   qualityHint: document.getElementById('quality-hint'),
-  audioAlert: document.getElementById('audio-alert'),
   preview: document.getElementById('preview'),
   onairBadge: document.getElementById('onair-badge'),
   onairText: document.getElementById('onair-text'),
@@ -168,19 +164,11 @@ ui.stopBtn.addEventListener('click', stopShare);
 async function startShare() {
   let stream;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: CAPTURE_VIDEO,
-      audio: ui.audioCheckbox.checked ? CAPTURE_AUDIO : false,
-      systemAudio: 'include',
-    });
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: CAPTURE_VIDEO });
   } catch {
     return; // Nutzer hat den Dialog abgebrochen.
   }
   state.stream = stream;
-  ui.audioAlert.classList.toggle(
-    'visible',
-    ui.audioCheckbox.checked && stream.getAudioTracks().length === 0,
-  );
   const [videoTrack] = stream.getVideoTracks();
   videoTrack.contentHint = 'detail';
   videoTrack.addEventListener('ended', stopShare);
@@ -208,7 +196,6 @@ function stopShare() {
   }
   ui.preview.srcObject = null;
   ui.preview.classList.remove('visible');
-  ui.audioAlert.classList.remove('visible');
   ui.shareBtn.hidden = false;
   ui.stopBtn.hidden = true;
   ui.onairBadge.classList.remove('onair');
