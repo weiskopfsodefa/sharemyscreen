@@ -66,9 +66,12 @@ des Anbieters setzen. Kein Build-Schritt.
 
 ## Technik / Grenzen (MVP)
 
-- Qualität per Dropdown auf der Host-Seite: 540p bis „Quelle (nativ)“, Standard 720p/15fps.
-  Gecaptured wird immer nativ; das Preset steuert Encoder-Skalierung und Bitrate pro Tablet
-  und wirkt live ohne Neustart (Presets: `QUALITY_PRESETS` in `public/js/host.js`).
+- Qualität per Dropdown auf der Host-Seite, Standard **„Automatisch“**: regelt pro Tablet
+  anhand der Stats (Paketverlust, Drossel-Ursache) über eine Stufenleiter – bei Engpässen
+  erst fps, dann Auflösung (nativ/30 → nativ/15 → 1080p/30 → … → 540p/15), bei freier
+  Kapazität wieder hoch. Feste Presets (540p bis „Quelle (nativ)“) bleiben wählbar.
+  Gecaptured wird immer nativ; Preset/Stufe steuert Encoder-Skalierung und Bitrate pro
+  Tablet und wirkt live ohne Neustart (`QUALITY_PRESETS`/`AUTO_LADDER` in `public/js/host.js`).
 - ICE nur mit STUN, **bewusst kein TURN** – damit Video nie unbemerkt übers Internet läuft.
 - **Raum-Codes sind dauerhaft**: Der Host-Browser merkt sich Code + Token in
   localStorage; existiert der Raum serverseitig nicht mehr (Deploy, Neustart,

@@ -38,6 +38,7 @@ export async function readConnectionStats({ pc }) {
     bytesReceived: null,
     fractionLost: null,
     framesPerSecond: null,
+    qualityLimitationReason: null,
     timestamp: performance.now(),
   };
 
@@ -57,6 +58,7 @@ export async function readConnectionStats({ pc }) {
     if (entry.type === 'outbound-rtp') {
       stats.bytesSent = entry.bytesSent ?? null;
       stats.framesPerSecond = entry.framesPerSecond ?? stats.framesPerSecond;
+      stats.qualityLimitationReason = entry.qualityLimitationReason ?? null;
     }
     if (entry.type === 'inbound-rtp') {
       stats.bytesReceived = entry.bytesReceived ?? null;

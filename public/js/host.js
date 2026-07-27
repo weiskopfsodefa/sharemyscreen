@@ -4,13 +4,35 @@ import { createPeerConnection, readConnectionStats, formatBitrate, PATH_LABELS }
 // Es wird immer in nativer Auflösung gecaptured; das Preset steuert pro Verbindung
 // die Encoder-Skalierung und Bitrate – Wechsel wirkt dadurch live, ohne Neustart.
 const QUALITY_PRESETS = {
+  auto: { label: 'Automatisch – erst fps, dann Auflösung', auto: true },
   '540p15': { label: '540p · 15 fps – sparsam', height: 540, maxFramerate: 15, maxBitrate: 700_000 },
-  '720p15': { label: '720p · 15 fps – Standard', height: 720, maxFramerate: 15, maxBitrate: 1_200_000 },
+  '720p15': { label: '720p · 15 fps', height: 720, maxFramerate: 15, maxBitrate: 1_200_000 },
   '1080p15': { label: '1080p · 15 fps', height: 1080, maxFramerate: 15, maxBitrate: 2_500_000 },
   '1080p30': { label: '1080p · 30 fps', height: 1080, maxFramerate: 30, maxBitrate: 4_000_000 },
   source: { label: 'Quelle (nativ) · 30 fps', height: null, maxFramerate: 30, maxBitrate: 6_000_000 },
 };
-const DEFAULT_QUALITY = '720p15';
+const DEFAULT_QUALITY = 'auto';
+
+// Stufenleiter für „Automatisch“ – pro Tablet: bei Engpässen erst fps senken,
+// dann Auflösung; bei Luft wieder hoch. Wirkt zusätzlich zur eingebauten
+// WebRTC-Staukontrolle, die innerhalb einer Stufe bereits zuerst fps drosselt.
+const AUTO_LADDER = [
+  { ...QUALITY_PRESETS.source, label: 'nativ/30' },
+  { label: 'nativ/15', height: null, maxFramerate: 15, maxBitrate: 4_000_000 },
+  { ...QUALITY_PRESETS['1080p30'], label: '1080p/30' },
+  { ...QUALITY_PRESETS['1080p15'], label: '1080p/15' },
+  { label: '720p/30', height: 720, maxFramerate: 30, maxBitrate: 2_000_000 },
+  { ...QUALITY_PRESETS['720p15'], label: '720p/15' },
+  { ...QUALITY_PRESETS['540p15'], label: '540p/15' },
+];
+// Einstieg mittig: hoch genug für schnellen Aufstieg, ohne dass 10 Tablets
+// gleichzeitig mit Maximal-Bitrate das WLAN fluten.
+const AUTO_START_STEP = 2;
+const AUTO_LOSS_LIMIT = 0.03;
+const AUTO_BAD_SAMPLES = 2; // 2 Messungen à 2 s anhaltend schlecht → eine Stufe runter
+const AUTO_CLEAN_MS = 30_000; // so lange sauber → eine Stufe rauf
+const AUTO_RETRY_MS = 30_000;
+const AUTO_RETRY_MAX_MS = 300_000;
 const QUALITY_KEY = 'sms-quality';
 const CAPTURE_VIDEO = { frameRate: { ideal: 30, max: 30 } };
 // Sprachverarbeitung aus – die ist für Mikrofone gedacht und verstümmelt Systemaudio/Musik.
@@ -208,6 +230,7 @@ function addViewer({ viewerId, name, needsOffer = true }) {
       lastBytesSent: null,
       lastTimestamp: null,
       pendingCandidates: [],
+      autoState: createAutoState(),
     };
     state.viewers.set(viewerId, viewer);
   } else if (name) {
@@ -242,11 +265,14 @@ async function connectViewer({ viewerId }) {
   viewer.stats = null;
   viewer.lastBytesSent = null;
   viewer.pendingCandidates = [];
+  // Erlernte Auto-Stufe über Reconnects behalten, nur die Messzähler zurücksetzen.
+  viewer.autoState.badSamples = 0;
+  viewer.autoState.cleanSinceTs = null;
 
   for (const track of state.stream.getTracks()) {
     pc.addTrack(track, state.stream);
   }
-  applyQuality({ pc });
+  applyQuality({ viewer });
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
@@ -265,7 +291,7 @@ async function connectViewer({ viewerId }) {
     viewer.status = stateMap[pc.connectionState] ?? viewer.status;
     if (pc.connectionState === 'connected') {
       // Nach der Verhandlung erneut anwenden – vorher kann setParameters scheitern.
-      applyQuality({ pc });
+      applyQuality({ viewer });
     }
     if (pc.connectionState === 'failed') {
       pc.close();
@@ -285,9 +311,64 @@ function currentPreset() {
   return QUALITY_PRESETS[ui.qualitySelect.value] ?? QUALITY_PRESETS[DEFAULT_QUALITY];
 }
 
-function applyQuality({ pc }) {
-  const preset = currentPreset();
-  for (const sender of pc.getSenders()) {
+function createAutoState() {
+  return {
+    step: AUTO_START_STEP,
+    badSamples: 0,
+    cleanSinceTs: null,
+    cooldownUntilTs: 0,
+    retryDelayMs: AUTO_RETRY_MS,
+    lastStepUpTs: 0,
+  };
+}
+
+function presetForViewer({ viewer }) {
+  const selected = currentPreset();
+  return selected.auto ? AUTO_LADDER[viewer.autoState.step] : selected;
+}
+
+function updateAutoStep({ viewer, stats }) {
+  const auto = viewer.autoState;
+  const step = AUTO_LADDER[auto.step];
+  const now = performance.now();
+  const lossBad = (stats.fractionLost ?? 0) > AUTO_LOSS_LIMIT;
+  const cpuBad = stats.qualityLimitationReason === 'cpu';
+  // 'bandwidth' meldet Chrome auch, wenn die Staukontrolle nur knapp unterm Limit
+  // hängt – erst deutlich darunter ist die Stufe wirklich zu hoch. Bei statischem
+  // Bildinhalt ist die Bitrate ebenfalls niedrig, der Grund dann aber 'none'.
+  const bandwidthBad = stats.qualityLimitationReason === 'bandwidth'
+    && stats.bitrate != null && stats.bitrate < step.maxBitrate * 0.6;
+
+  if (lossBad || cpuBad || bandwidthBad) {
+    auto.badSamples += 1;
+    auto.cleanSinceTs = null;
+    if (auto.badSamples >= AUTO_BAD_SAMPLES && auto.step < AUTO_LADDER.length - 1) {
+      auto.step += 1;
+      auto.badSamples = 0;
+      // Scheitert ein Aufstieg sofort wieder, den nächsten Versuch immer weiter
+      // hinausschieben – sonst pendelt die Qualität sichtbar hin und her.
+      auto.retryDelayMs = now - auto.lastStepUpTs < 60_000
+        ? Math.min(auto.retryDelayMs * 2, AUTO_RETRY_MAX_MS)
+        : AUTO_RETRY_MS;
+      auto.cooldownUntilTs = now + auto.retryDelayMs;
+      applyQuality({ viewer });
+    }
+    return;
+  }
+
+  auto.badSamples = 0;
+  auto.cleanSinceTs ??= now;
+  if (auto.step > 0 && now - auto.cleanSinceTs >= AUTO_CLEAN_MS && now >= auto.cooldownUntilTs) {
+    auto.step -= 1;
+    auto.cleanSinceTs = now;
+    auto.lastStepUpTs = now;
+    applyQuality({ viewer });
+  }
+}
+
+function applyQuality({ viewer }) {
+  const preset = presetForViewer({ viewer });
+  for (const sender of viewer.pc.getSenders()) {
     if (sender.track?.kind !== 'video') continue;
     const captureHeight = sender.track.getSettings().height;
     const scale = preset.height && captureHeight ? Math.max(1, captureHeight / preset.height) : 1;
@@ -305,12 +386,19 @@ function applyQuality({ pc }) {
 
 function applyQualityToAll() {
   for (const viewer of state.viewers.values()) {
-    if (viewer.pc) applyQuality({ pc: viewer.pc });
+    if (viewer.pc) applyQuality({ viewer });
   }
 }
 
 function renderQualityHint() {
   const preset = currentPreset();
+  if (preset.auto) {
+    ui.qualityHint.textContent =
+      'Regelt pro Tablet selbst nach: bei Engpässen erst weniger fps, dann kleinere Auflösung ' +
+      '(nativ/30 → nativ/15 → 1080p/30 → …) – und automatisch wieder hoch, sobald Luft ist. ' +
+      'Die aktuelle Stufe steht in der Tablet-Liste.';
+    return;
+  }
   ui.qualityHint.textContent =
     `Max. ${formatBitrate({ bits: preset.maxBitrate })} pro Tablet – Gesamtlast im WLAN ist ` +
     '„pro Tablet × Anzahl Tablets“. Wechsel wirkt sofort, ohne die Übertragung neu zu starten.';
@@ -327,6 +415,13 @@ function initQualitySelect() {
   ui.qualitySelect.value = QUALITY_PRESETS[saved] ? saved : DEFAULT_QUALITY;
   ui.qualitySelect.addEventListener('change', () => {
     localStorage.setItem(QUALITY_KEY, ui.qualitySelect.value);
+    if (currentPreset().auto) {
+      // Frisch messen statt mit veralteten „sauber seit“-Zeiten sofort hochzuspringen.
+      for (const viewer of state.viewers.values()) {
+        viewer.autoState.badSamples = 0;
+        viewer.autoState.cleanSinceTs = null;
+      }
+    }
     applyQualityToAll();
     renderQualityHint();
   });
@@ -370,6 +465,7 @@ setInterval(async () => {
     viewer.lastBytesSent = stats.bytesSent;
     viewer.lastTimestamp = stats.timestamp;
     viewer.stats = stats;
+    if (currentPreset().auto) updateAutoStep({ viewer, stats });
     if (stats.path === 'relay') anyRelay = true;
   }
   ui.relayAlert.classList.toggle('visible', anyRelay);
@@ -402,10 +498,11 @@ function renderViewers() {
       const stats = viewer.stats;
       const path = stats?.path ? PATH_LABELS[stats.path] : null;
       const ledClass = viewer.status === 'verbunden' ? 'ok' : viewer.status === 'wartet' ? '' : 'warn';
+      const autoStep = currentPreset().auto && viewer.pc ? AUTO_LADDER[viewer.autoState.step].label : null;
       return `<tr>
         <td><span class="led ${ledClass}"></span></td>
         <td class="name">${escapeHtml({ text: viewerDisplayName({ viewer }) })}</td>
-        <td>${viewer.status}</td>
+        <td>${viewer.status}${autoStep ? ` · ${autoStep}` : ''}</td>
         <td>${path ? `<span class="chip ${path.css}" title="${path.hint}">${path.text}</span>` : '–'}</td>
         <td>${formatBitrate({ bits: stats?.bitrate ?? null })}</td>
         <td>${stats?.framesPerSecond ?? '–'}</td>
