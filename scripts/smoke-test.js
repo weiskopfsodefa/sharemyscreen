@@ -100,6 +100,19 @@ try {
   if (renamed.viewerId !== joined.viewerId || renamed.name !== 'Billard') fail({ reason: 'Umbenennen fehlgeschlagen' });
   console.log('✓ Umbenennen wird an den Host weitergeleitet');
 
+  // Wiederholte Joins dürfen ihre Wiederherstellungsabsicht nicht verlieren.
+  for (const needsOffer of [true, false]) {
+    sendJson({ socket: viewer, message: { type: 'viewer:join', code: created.code, viewerId: joined.viewerId, needsOffer } });
+    const ack = await waitFor({ socket: viewer, type: 'viewer:joined' });
+    const notice = await waitFor({ socket: host, type: 'viewer:joined' });
+    if (ack.viewerId !== joined.viewerId || notice.needsOffer !== needsOffer) {
+      fail({ reason: 'Wiederholter Join verliert ID oder needsOffer' });
+    }
+  }
+  sendJson({ socket: viewer, message: { type: 'ping' } });
+  await waitFor({ socket: viewer, type: 'pong' });
+  console.log('✓ Wiederholter Beitritt und Anwendungs-Heartbeat funktionieren');
+
   // 3. Signaling Host -> Viewer (Offer) und zurück (Answer)
   sendJson({
     socket: host,
@@ -168,6 +181,21 @@ try {
   const alive = await fetch(`http://localhost:${PORT}/`);
   if (alive.status !== 200) fail({ reason: 'Server nach kaputter URL nicht mehr erreichbar' });
   console.log('✓ Kaputte URL wird mit 400 beantwortet, Server läuft weiter');
+
+  // Echter Socket-Wechsel mit derselben Viewer-ID, anschließend neue Verhandlung.
+  viewer.close();
+  const left = await waitFor({ socket: host2, type: 'viewer:left' });
+  if (left.viewerId !== joined.viewerId) fail({ reason: 'Falscher Viewer abgemeldet' });
+  const viewer2 = await openSocket();
+  sendJson({ socket: viewer2, message: { type: 'viewer:join', code: created.code, viewerId: joined.viewerId, needsOffer: true } });
+  const recovered = await waitFor({ socket: viewer2, type: 'viewer:joined' });
+  const recoveryNotice = await waitFor({ socket: host2, type: 'viewer:joined' });
+  if (recovered.viewerId !== joined.viewerId || recoveryNotice.needsOffer !== true) fail({ reason: 'Viewer-Reconnect fehlgeschlagen' });
+  sendJson({ socket: host2, message: { type: 'signal', to: joined.viewerId, payload: { negotiationId: 'retry-1', sdp: { type: 'offer', sdp: 'fake' } } } });
+  const retryOffer = await waitFor({ socket: viewer2, type: 'signal' });
+  if (retryOffer.payload.negotiationId !== 'retry-1') fail({ reason: 'Versuchskennung verloren' });
+  viewer2.close();
+  console.log('✓ Viewer kehrt nach Socket-Abbruch zurück und erhält neues Angebot');
 
   host2.close();
   viewer.close();

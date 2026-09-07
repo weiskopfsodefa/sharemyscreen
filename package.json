@@ -6,7 +6,8 @@
   "description": "Bildschirm live an Tablets im lokalen Netz streamen – WebRTC P2P-Fanout mit gehostetem Signaling.",
   "scripts": {
     "start": "node server.js",
-    "smoke-test": "node scripts/smoke-test.js"
+    "smoke-test": "node scripts/smoke-test.js",
+    "test": "node --test tests/*.test.js"
   },
   "engines": {
     "node": ">=20"

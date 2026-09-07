@@ -31,11 +31,13 @@ const state = {
   // Kandidaten, die eintreffen, bevor setRemoteDescription fertig ist – sonst gehen
   // ausgerechnet die zuerst gesendeten lokalen LAN-Kandidaten verloren.
   pendingCandidates: [],
+  negotiationId: null,
   wakeLock: null,
   rejoinTimer: null,
   joinRetryTimer: null,
   fadeTimer: null,
   stuckTimer: null,
+  disconnectTimer: null,
 };
 
 // Raum-Codes sind dauerhaft: Kommt der Host (oder der Server) zurück, existiert
@@ -57,7 +59,7 @@ const signaling = new SignalingClient({
   onOpen: () => joinRoom(),
   onMessage: ({ message }) => {
     const handler = MESSAGE_HANDLERS[message.type];
-    if (handler) handler({ message });
+    if (handler) return handler({ message });
   },
   onStatusChange: ({ status }) => {
     if (status === 'offline' && !state.pc) {
@@ -84,6 +86,11 @@ function deviceName() {
 }
 
 function joinRoom() {
+  clearTimeout(state.rejoinTimer);
+  state.rejoinTimer = null;
+  // Auch während eines Aufbaus nach WS-Reconnect beim Server registrieren,
+  // aber kein zweites Angebot anfordern. Der Aufbau hat einen eigenen Timeout.
+  scheduleJoinRetry();
   signaling.send({
     message: {
       type: 'viewer:join',
@@ -92,7 +99,7 @@ function joinRoom() {
       name: deviceName(),
       // Läuft die P2P-Verbindung noch (z. B. WS-Reconnect nach Server-Neustart),
       // braucht der Host kein neues Angebot zu schicken – das Bild bliebe sonst kurz schwarz.
-      needsOffer: state.pc?.connectionState !== 'connected',
+      needsOffer: !state.pc || !['new', 'connecting', 'connected'].includes(state.pc.connectionState),
     },
   });
 }
@@ -111,13 +118,13 @@ ui.renameBtn.addEventListener('click', () => {
 
 const MESSAGE_HANDLERS = {
   'viewer:joined': ({ message }) => {
-    clearTimeout(state.joinRetryTimer);
     state.viewerId = message.viewerId;
     sessionStorage.setItem(VIEWER_ID_KEY, message.viewerId);
     // Läuft das Video bereits (Rejoin nach Server-Neustart bei intakter P2P-Verbindung),
     // wird ohne Neuverhandlung kein 'connected'-Event mehr feuern – den Overlay, den
     // ein zwischenzeitliches „Raum nicht aktiv“ gezeigt hat, hier explizit verstecken.
     if (state.pc?.connectionState === 'connected') {
+      clearTimeout(state.joinRetryTimer);
       ui.overlay.classList.add('hidden');
       return;
     }
@@ -139,8 +146,10 @@ const MESSAGE_HANDLERS = {
     if (!state.pc) setStatus({ text: 'Host ist offline', sub: 'Warten auf erneute Verbindung…' });
   },
   'room:closed': () => {
-    teardownPeer();
-    setStatus({ text: 'Raum gerade nicht aktiv', sub: 'Verbinde automatisch neu, sobald der Host zurück ist…' });
+    if (state.pc?.connectionState !== 'connected') {
+      teardownPeer();
+      setStatus({ text: 'Raum gerade nicht aktiv', sub: 'Verbinde automatisch neu, sobald der Host zurück ist…' });
+    }
     scheduleJoinRetry();
   },
   error: ({ message }) => {
@@ -152,16 +161,19 @@ const MESSAGE_HANDLERS = {
       }
       scheduleJoinRetry();
     } else if (message.code === 'room-full') {
-      setStatus({ text: 'Raum ist voll', sub: 'Maximale Anzahl Tablets erreicht.' });
+      setStatus({ text: 'Raum ist voll', sub: 'Warte auf einen freien Platz – verbinde automatisch…' });
+      scheduleJoinRetry();
     }
   },
   signal: async ({ message }) => {
     const { payload } = message;
-    if (payload.sdp) {
-      await acceptOffer({ sdp: payload.sdp });
-    } else if (payload.candidate) {
-      if (state.pc?.remoteDescription) {
-        state.pc.addIceCandidate(payload.candidate).catch(() => {});
+    if (!payload) return;
+    if (payload.sdp?.type === 'offer') {
+      await acceptOffer({ sdp: payload.sdp, negotiationId: payload.negotiationId });
+    } else if (payload.candidate && state.pc && payload.negotiationId === state.negotiationId) {
+      const pc = state.pc;
+      if (pc.remoteDescription) {
+        await pc.addIceCandidate(payload.candidate).catch((err) => console.warn('ICE-Kandidat abgelehnt', err));
       } else {
         state.pendingCandidates.push(payload.candidate);
       }
@@ -171,8 +183,13 @@ const MESSAGE_HANDLERS = {
 
 // --- WebRTC-Empfang ---
 
-async function acceptOffer({ sdp }) {
+async function acceptOffer({ sdp, negotiationId }) {
+  if (state.pc && negotiationId && negotiationId === state.negotiationId) return;
   teardownPeer();
+  clearTimeout(state.joinRetryTimer);
+  clearTimeout(state.rejoinTimer);
+  state.rejoinTimer = null;
+  state.negotiationId = negotiationId;
   const pc = createPeerConnection();
   state.pc = pc;
   state.pendingCandidates = [];
@@ -181,14 +198,18 @@ async function acceptOffer({ sdp }) {
   clearTimeout(state.stuckTimer);
   state.stuckTimer = setTimeout(() => {
     if (state.pc === pc && pc.connectionState !== 'connected') {
-      setStatus({
-        text: 'Verbindung kommt nicht zustande',
-        sub: 'Häufige Ursachen: VPN am Host-Laptop aktiv, oder das WLAN blockiert Geräte-zu-Geräte-Verkehr (Client-/AP-Isolation am Router).',
-      });
+      handleConnectionLost();
     }
-  }, 10_000);
+  }, 20_000);
+
+  const outgoingCandidates = [];
+  let answerSent = false;
+  const sendCandidate = (candidate) => signaling.send({
+    message: { type: 'signal', payload: { candidate, negotiationId } },
+  });
 
   pc.ontrack = (event) => {
+    if (state.pc !== pc) return;
     const [stream] = event.streams;
     if (ui.video.srcObject !== stream) {
       ui.video.srcObject = stream;
@@ -196,42 +217,66 @@ async function acceptOffer({ sdp }) {
     }
   };
   pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      signaling.send({ message: { type: 'signal', payload: { candidate: event.candidate } } });
-    }
+    if (state.pc !== pc || !event.candidate) return;
+    if (answerSent) sendCandidate(event.candidate);
+    else outgoingCandidates.push(event.candidate);
   };
   pc.onconnectionstatechange = () => {
     if (state.pc !== pc) return;
     if (pc.connectionState === 'connected') {
       clearTimeout(state.stuckTimer);
+      clearTimeout(state.disconnectTimer);
+      clearTimeout(state.joinRetryTimer);
+      clearTimeout(state.rejoinTimer);
+      state.rejoinTimer = null;
       ui.overlay.classList.add('hidden');
       requestWakeLock();
       showControls();
     } else if (pc.connectionState === 'failed') {
       handleConnectionLost();
     } else if (pc.connectionState === 'disconnected') {
-      setTimeout(() => {
+      clearTimeout(state.disconnectTimer);
+      state.disconnectTimer = setTimeout(() => {
         if (state.pc === pc && pc.connectionState === 'disconnected') handleConnectionLost();
       }, DISCONNECT_GRACE_MS);
     }
   };
 
-  await pc.setRemoteDescription(sdp);
-  for (const candidate of state.pendingCandidates.splice(0)) {
-    pc.addIceCandidate(candidate).catch(() => {});
+  try {
+    await pc.setRemoteDescription(sdp);
+    if (state.pc !== pc) return;
+    for (const candidate of state.pendingCandidates.splice(0)) {
+      await pc.addIceCandidate(candidate).catch((err) => console.warn('ICE-Kandidat abgelehnt', err));
+    }
+    const answer = await pc.createAnswer();
+    if (state.pc !== pc) return;
+    await pc.setLocalDescription(answer);
+    if (state.pc !== pc) return;
+    if (!signaling.send({ message: { type: 'signal', payload: { sdp: pc.localDescription, negotiationId } } })) {
+      handleConnectionLost();
+      return;
+    }
+    answerSent = true;
+    outgoingCandidates.forEach(sendCandidate);
+  } catch (err) {
+    console.warn('Verbindungsaufbau fehlgeschlagen', err);
+    if (state.pc === pc) handleConnectionLost();
   }
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  signaling.send({ message: { type: 'signal', payload: { sdp: pc.localDescription } } });
 }
 
 function teardownPeer() {
-  state.pc?.close();
+  clearTimeout(state.stuckTimer);
+  clearTimeout(state.disconnectTimer);
+  const pc = state.pc;
   state.pc = null;
+  state.negotiationId = null;
+  state.pendingCandidates = [];
+  pc?.close();
 }
 
 function handleConnectionLost() {
   teardownPeer();
+  clearTimeout(state.joinRetryTimer);
   setStatus({ text: 'Verbindung verloren', sub: 'Verbinde automatisch neu…' });
   if (state.rejoinTimer) return;
   state.rejoinTimer = setTimeout(() => {
@@ -276,6 +321,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     if (state.pc) requestWakeLock();
     playVideo();
+    if (!state.pc) joinRoom();
   }
 });
 
@@ -393,7 +439,10 @@ setInterval(async () => {
     ui.pathChip.textContent = '';
     return;
   }
-  const stats = await readConnectionStats({ pc: state.pc });
+  const pc = state.pc;
+  let stats;
+  try { stats = await readConnectionStats({ pc }); } catch { return; }
+  if (state.pc !== pc) return;
   const path = stats.path ? PATH_LABELS[stats.path] : null;
   if (path) {
     ui.pathChip.textContent = path.text;

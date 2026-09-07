@@ -167,9 +167,11 @@ function handleSignal({ socket, message }) {
   const room = rooms.get(meta.code);
   if (!room) return;
   if (meta.role === 'host') {
+    if (room.hostSocket !== socket) return;
     const viewerSocket = room.viewers.get(message.to);
     send({ socket: viewerSocket, message: { type: 'signal', from: 'host', payload: message.payload } });
   } else {
+    if (room.viewers.get(meta.viewerId) !== socket) return;
     send({ socket: room.hostSocket, message: { type: 'signal', from: meta.viewerId, payload: message.payload } });
   }
 }
@@ -192,6 +194,7 @@ function handleDisconnect({ socket }) {
 }
 
 const MESSAGE_HANDLERS = {
+  ping: ({ socket }) => send({ socket, message: { type: 'pong' } }),
   'host:create': handleHostCreate,
   'host:reclaim': handleHostReclaim,
   'viewer:join': handleViewerJoin,
@@ -293,6 +296,7 @@ wss.on('connection', (socket) => {
     } catch {
       return;
     }
+    if (!message || typeof message.type !== 'string') return;
     const handler = MESSAGE_HANDLERS[message.type];
     if (handler) handler({ socket, message });
   });

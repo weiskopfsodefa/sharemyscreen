@@ -16,6 +16,7 @@ Video:                P2P im WLAN (Host -> jedes Tablet einzeln)
 npm install
 npm start          # http://localhost:3000
 npm run smoke-test # Signaling-Tests
+npm test           # Reconnect-Regressionstests mit simulierten Ausfällen
 ```
 
 Hinweis: `getDisplayMedia()` braucht einen sicheren Kontext. `http://localhost` zählt als
@@ -64,12 +65,17 @@ des Anbieters setzen. Kein Build-Schritt.
 
 ## Technik / Grenzen (MVP)
 
-- Qualität per Dropdown auf der Host-Seite, Standard **„Automatisch“**: regelt pro Tablet
-  anhand der Stats (Paketverlust, Drossel-Ursache) über eine Stufenleiter – bei Engpässen
-  erst fps, dann Auflösung (nativ/30 → nativ/15 → 1080p/30 → … → 540p/15), bei freier
-  Kapazität wieder hoch. Feste Presets (540p bis „Quelle (nativ)“) bleiben wählbar.
-  Gecaptured wird immer nativ; Preset/Stufe steuert Encoder-Skalierung und Bitrate pro
-  Tablet und wirkt live ohne Neustart (`QUALITY_PRESETS`/`AUTO_LADDER` in `public/js/host.js`).
+- Vor dem Teilen wählt der Host eine **Priorität**: **„Flüssige Bewegung“** (Standard,
+  für Videos) oder **„Hohe Bildschärfe“** (für Text/Präsentationen). Die Auswahl wird
+  gespeichert und bleibt während der Übertragung gesperrt; zum Wechseln erst stoppen.
+  Bewegungsmodus nutzt `motion`/`maintain-framerate`, Detailmodus `detail`/`maintain-resolution`.
+- Qualität per Dropdown, Standard **„Automatisch“**: startet bei 1080p/30 und regelt
+  pro Tablet anhand von Paketverlust und Drossel-Ursache. Bewegung reduziert zuerst
+  die Auflösung (nativ/30 → 1080p/30 → 720p/30 → 540p/30 → 540p/15); Bildschärfe
+  reduziert zuerst fps (nativ/30 → nativ/15 → 1080p/30 → 1080p/15 → …).
+  Feste Presets behalten unabhängig von der Priorität ihre fps-/Auflösungsgrenzen.
+  Gecaptured wird nativ mit bis zu 30 fps; Skalierung und Bitrate wirken pro Tablet
+  live ohne Neustart (`QUALITY_PRESETS`/`STREAM_MODES` in `public/js/host.js`).
 - ICE nur mit STUN, **bewusst kein TURN** – damit Video nie unbemerkt übers Internet läuft.
 - **Raum-Codes sind dauerhaft**: Der Host-Browser merkt sich Code + Token in
   localStorage; existiert der Raum serverseitig nicht mehr (Deploy, Neustart,
@@ -79,3 +85,23 @@ des Anbieters setzen. Kein Build-Schritt.
   gedruckten) Code nach einem Neustart nicht übernehmen.
 - Kein SFU/Medienserver. Wenn 10 Tablets per P2P nicht stabil laufen, ist das die
   nächste Ausbaustufe.
+
+## Wiederverbindung
+
+- Ein WebSocket-Abbruch beendet keine funktionierende P2P-Videoverbindung.
+  Das gilt auch, wenn der Raum während eines längeren Serverausfalls abläuft.
+- Ohne Video wiederholen Tablets den Beitritt alle 10 Sekunden; nach einem
+  erkannten Videoabbruch zunächst nach 2 Sekunden. Eine reine Beitrittsbestätigung
+  beendet die Wiederholungen noch nicht. Ein neuer Aufbau hat 20 Sekunden Zeit.
+- Der Host versucht fehlgeschlagene Verbindungen ebenfalls erneut und begrenzt
+  einen hängenden Aufbau auf 25 Sekunden. Kurze WebRTC-Unterbrechungen bekommen
+  eine Erholungsfrist (Tablet 4 Sekunden, Host 8 Sekunden).
+- Jeder Aufbau trägt eine eigene Kennung, damit verspätete Antworten und
+  ICE-Kandidaten keinen neueren Versuch beschädigen. SDP wird vor ICE gesendet.
+- Ein Anwendungs-Heartbeat erkennt auch scheinbar offene, nicht mehr antwortende
+  WebSockets; der Client verbindet sich mit bis zu 10 Sekunden Abstand erneut.
+
+`npm test` prüft diese Zustandsübergänge mit kontrollierten Timern und simulierten
+WebRTC-/WebSocket-Schnittstellen. Echte WLAN-Störungen und Medienwiedergabe müssen
+zusätzlich mit den Zielgeräten getestet werden. Nach einem Update Host und Tablets
+neu laden, damit alle dieselbe Signaling-Version verwenden.

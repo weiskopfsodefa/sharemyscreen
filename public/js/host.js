@@ -13,21 +13,34 @@ const QUALITY_PRESETS = {
 };
 const DEFAULT_QUALITY = 'auto';
 
-// Stufenleiter für „Automatisch“ – pro Tablet: bei Engpässen erst fps senken,
-// dann Auflösung; bei Luft wieder hoch. Wirkt zusätzlich zur eingebauten
-// WebRTC-Staukontrolle, die innerhalb einer Stufe bereits zuerst fps drosselt.
-const AUTO_LADDER = [
-  { ...QUALITY_PRESETS.source, label: 'nativ/30' },
-  { label: 'nativ/15', height: null, maxFramerate: 15, maxBitrate: 4_000_000 },
-  { ...QUALITY_PRESETS['1080p30'], label: '1080p/30' },
-  { ...QUALITY_PRESETS['1080p15'], label: '1080p/15' },
-  { label: '720p/30', height: 720, maxFramerate: 30, maxBitrate: 2_000_000 },
-  { ...QUALITY_PRESETS['720p15'], label: '720p/15' },
-  { ...QUALITY_PRESETS['540p15'], label: '540p/15' },
-];
-// Einstieg mittig: hoch genug für schnellen Aufstieg, ohne dass 10 Tablets
-// gleichzeitig mit Maximal-Bitrate das WLAN fluten.
-const AUTO_START_STEP = 2;
+// Bewegungsmodus hält 30 fps bis zur kleinsten Auflösung. Detailmodus
+// priorisiert die Auflösung und reduziert dafür früher die Bildrate.
+const STREAM_MODES = {
+  motion: {
+    contentHint: 'motion', degradationPreference: 'maintain-framerate', startStep: 1,
+    ladder: [
+      { ...QUALITY_PRESETS.source, label: 'nativ/30' },
+      { ...QUALITY_PRESETS['1080p30'], label: '1080p/30' },
+      { label: '720p/30', height: 720, maxFramerate: 30, maxBitrate: 2_000_000 },
+      { label: '540p/30', height: 540, maxFramerate: 30, maxBitrate: 1_200_000 },
+      { ...QUALITY_PRESETS['540p15'], label: '540p/15' },
+    ],
+  },
+  detail: {
+    contentHint: 'detail', degradationPreference: 'maintain-resolution', startStep: 2,
+    ladder: [
+      { ...QUALITY_PRESETS.source, label: 'nativ/30' },
+      { label: 'nativ/15', height: null, maxFramerate: 15, maxBitrate: 4_000_000 },
+      { ...QUALITY_PRESETS['1080p30'], label: '1080p/30' },
+      { ...QUALITY_PRESETS['1080p15'], label: '1080p/15' },
+      { label: '720p/30', height: 720, maxFramerate: 30, maxBitrate: 2_000_000 },
+      { ...QUALITY_PRESETS['720p15'], label: '720p/15' },
+      { ...QUALITY_PRESETS['540p15'], label: '540p/15' },
+    ],
+  },
+};
+const DEFAULT_STREAM_MODE = 'motion';
+const STREAM_MODE_KEY = 'sms-stream-mode';
 const AUTO_LOSS_LIMIT = 0.03;
 const AUTO_BAD_SAMPLES = 2; // 2 Messungen à 2 s anhaltend schlecht → eine Stufe runter
 const AUTO_CLEAN_MS = 30_000; // so lange sauber → eine Stufe rauf
@@ -55,6 +68,8 @@ const ui = {
   copyLink: document.getElementById('copy-link'),
   shareBtn: document.getElementById('share-btn'),
   stopBtn: document.getElementById('stop-btn'),
+  streamMode: document.getElementById('stream-mode'),
+  modeInputs: [...document.querySelectorAll('input[name="stream-mode"]')],
   qualitySelect: document.getElementById('quality-select'),
   qualityHint: document.getElementById('quality-hint'),
   preview: document.getElementById('preview'),
@@ -71,6 +86,8 @@ const state = {
   code: null,
   hostToken: null,
   stream: null,
+  starting: false,
+  streamMode: DEFAULT_STREAM_MODE,
   /** @type {Map<string, {pc: RTCPeerConnection|null, label: string, status: string, stats: object|null, lastBytesSent: number|null, lastTimestamp: number|null}>} */
   viewers: new Map(),
   nextLabelNumber: 1,
@@ -91,7 +108,7 @@ const signaling = new SignalingClient({
   },
   onMessage: ({ message }) => {
     const handler = MESSAGE_HANDLERS[message.type];
-    if (handler) handler({ message });
+    if (handler) return handler({ message });
   },
   onStatusChange: ({ status }) => {
     ui.wsLed.className = `led ${status === 'online' ? 'ok' : 'bad'}`;
@@ -145,7 +162,7 @@ function renderRoom() {
   ui.roomCode.textContent = state.code;
   ui.joinUrl.textContent = joinUrl;
   ui.copyLink.disabled = false;
-  ui.shareBtn.disabled = false;
+  ui.shareBtn.disabled = state.starting;
   ui.qrImg.src = `/qr.svg?text=${encodeURIComponent(joinUrl)}`;
   ui.qrImg.hidden = false;
 }
@@ -162,15 +179,23 @@ ui.shareBtn.addEventListener('click', startShare);
 ui.stopBtn.addEventListener('click', stopShare);
 
 async function startShare() {
+  if (state.starting || state.stream) return;
+  state.starting = true;
+  ui.shareBtn.disabled = true;
+  ui.streamMode.disabled = true;
   let stream;
   try {
     stream = await navigator.mediaDevices.getDisplayMedia({ video: CAPTURE_VIDEO });
   } catch {
     return; // Nutzer hat den Dialog abgebrochen.
+  } finally {
+    state.starting = false;
+    ui.shareBtn.disabled = false;
+    ui.streamMode.disabled = Boolean(stream);
   }
   state.stream = stream;
   const [videoTrack] = stream.getVideoTracks();
-  videoTrack.contentHint = 'detail';
+  videoTrack.contentHint = currentStreamMode().contentHint;
   videoTrack.addEventListener('ended', stopShare);
 
   ui.preview.srcObject = stream;
@@ -188,7 +213,11 @@ async function startShare() {
 function stopShare() {
   state.stream?.getTracks().forEach((track) => track.stop());
   state.stream = null;
+  ui.streamMode.disabled = false;
   for (const viewer of state.viewers.values()) {
+    clearTimeout(viewer.retryTimer);
+    clearTimeout(viewer.connectTimer);
+    clearTimeout(viewer.disconnectTimer);
     viewer.pc?.close();
     viewer.pc = null;
     viewer.status = 'wartet';
@@ -223,75 +252,138 @@ function addViewer({ viewerId, name, needsOffer = true }) {
   } else if (name) {
     viewer.name = name;
   }
-  // needsOffer=false heißt: die P2P-Verbindung des Tablets läuft noch (z. B. nach
-  // Server-Neustart) – nicht neu verhandeln, sonst wird das Bild grundlos schwarz.
-  // Das gilt aber nur, solange hier auch eine lebende Verbindung existiert: Nach einem
-  // viewer:left hat der Host sie geschlossen, während das Tablet das erst nach bis zu
-  // ~30 s (ICE-Consent-Timeout) bemerkt und bis dahin fälschlich needsOffer=false meldet.
-  if (state.stream && (needsOffer || !viewer.pc)) {
-    connectViewer({ viewerId });
-  }
+  viewer.signalingOnline = true;
+  // Laufenden Aufbau nicht durch doppelte Join-/Reclaim-Nachrichten ersetzen.
+  const connecting = viewer.pc && ['new', 'connecting'].includes(viewer.pc.connectionState);
+  const unusable = !viewer.pc || ['failed', 'closed', 'disconnected'].includes(viewer.pc.connectionState);
+  if (state.stream && !connecting && (needsOffer || unusable)) connectViewer({ viewerId });
   renderViewers();
 }
 
 function removeViewer({ viewerId }) {
   const viewer = state.viewers.get(viewerId);
-  viewer?.pc?.close();
-  state.viewers.delete(viewerId);
+  if (!viewer) return;
+  viewer.signalingOnline = false;
+  clearTimeout(viewer.retryTimer);
+  // Ein WS-Abbruch sagt nichts über die lokale Videoverbindung aus.
+  // Solange diese lebt, behalten wir sie auch bei längerem Serverausfall.
+  if (!viewer.pc) state.viewers.delete(viewerId);
+  renderViewers();
+}
+
+function retryViewer({ viewerId, viewer, pc }) {
+  if (state.viewers.get(viewerId) !== viewer || viewer.pc !== pc) return;
+  clearTimeout(viewer.connectTimer);
+  clearTimeout(viewer.disconnectTimer);
+  viewer.pc = null;
+  pc.close();
+  viewer.stats = null;
+  viewer.status = 'getrennt';
+  if (!viewer.signalingOnline) {
+    state.viewers.delete(viewerId);
+  } else if (state.stream) {
+    clearTimeout(viewer.retryTimer);
+    viewer.retryTimer = setTimeout(() => {
+      if (state.viewers.get(viewerId) === viewer && !viewer.pc && viewer.signalingOnline) {
+        connectViewer({ viewerId });
+      }
+    }, 3000);
+  }
   renderViewers();
 }
 
 async function connectViewer({ viewerId }) {
   const viewer = state.viewers.get(viewerId);
-  if (!viewer || !state.stream) return;
+  if (!viewer || !state.stream || !viewer.signalingOnline) return;
+  clearTimeout(viewer.retryTimer);
+  clearTimeout(viewer.connectTimer);
+  clearTimeout(viewer.disconnectTimer);
   viewer.pc?.close();
 
   const pc = createPeerConnection();
+  const negotiationId = crypto.randomUUID();
+  viewer.negotiationId = negotiationId;
   viewer.pc = pc;
   viewer.status = 'verbindet…';
   viewer.stats = null;
   viewer.lastBytesSent = null;
   viewer.pendingCandidates = [];
-  // Erlernte Auto-Stufe über Reconnects behalten, nur die Messzähler zurücksetzen.
   viewer.autoState.badSamples = 0;
   viewer.autoState.cleanSinceTs = null;
-
-  for (const track of state.stream.getTracks()) {
-    pc.addTrack(track, state.stream);
-  }
-  applyQuality({ viewer });
+  const isCurrent = () => state.viewers.get(viewerId) === viewer && viewer.pc === pc;
+  const retry = () => retryViewer({ viewerId, viewer, pc });
+  viewer.connectTimer = setTimeout(retry, 25_000);
+  const outgoingCandidates = [];
+  let offerSent = false;
+  const sendCandidate = (candidate) => signaling.send({
+    message: { type: 'signal', to: viewerId, payload: { candidate, negotiationId } },
+  });
 
   pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      signaling.send({ message: { type: 'signal', to: viewerId, payload: { candidate: event.candidate } } });
-    }
+    if (!isCurrent() || !event.candidate) return;
+    if (offerSent) sendCandidate(event.candidate);
+    else outgoingCandidates.push(event.candidate);
   };
   pc.onconnectionstatechange = () => {
-    if (viewer.pc !== pc) return;
+    if (!isCurrent()) return;
     const stateMap = {
-      connecting: 'verbindet…',
-      connected: 'verbunden',
-      disconnected: 'instabil…',
-      failed: 'getrennt',
-      closed: 'getrennt',
+      connecting: 'verbindet…', connected: 'verbunden', disconnected: 'instabil…',
+      failed: 'getrennt', closed: 'getrennt',
     };
     viewer.status = stateMap[pc.connectionState] ?? viewer.status;
     if (pc.connectionState === 'connected') {
-      // Nach der Verhandlung erneut anwenden – vorher kann setParameters scheitern.
+      clearTimeout(viewer.connectTimer);
+      clearTimeout(viewer.disconnectTimer);
       applyQuality({ viewer });
-    }
-    if (pc.connectionState === 'failed') {
-      pc.close();
-      viewer.pc = null;
-      viewer.stats = null;
+    } else if (pc.connectionState === 'failed') {
+      retry();
+    } else if (pc.connectionState === 'disconnected') {
+      clearTimeout(viewer.disconnectTimer);
+      viewer.disconnectTimer = setTimeout(() => {
+        if (pc.connectionState === 'disconnected') retry();
+      }, 8000);
     }
     renderViewers();
   };
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  signaling.send({ message: { type: 'signal', to: viewerId, payload: { sdp: pc.localDescription } } });
-  renderViewers();
+  try {
+    for (const track of state.stream.getTracks()) pc.addTrack(track, state.stream);
+    applyQuality({ viewer });
+    const offer = await pc.createOffer();
+    if (!isCurrent()) return;
+    await pc.setLocalDescription(offer);
+    if (!isCurrent()) return;
+    if (!signaling.send({ message: { type: 'signal', to: viewerId, payload: { sdp: pc.localDescription, negotiationId } } })) {
+      retry();
+      return;
+    }
+    offerSent = true;
+    outgoingCandidates.forEach(sendCandidate);
+    renderViewers();
+  } catch (err) {
+    console.warn('Verbindungsaufbau fehlgeschlagen', err);
+    retry();
+  }
+}
+
+function currentStreamMode() {
+  return STREAM_MODES[state.streamMode];
+}
+
+function initStreamMode() {
+  const saved = localStorage.getItem(STREAM_MODE_KEY);
+  state.streamMode = Object.hasOwn(STREAM_MODES, saved) ? saved : DEFAULT_STREAM_MODE;
+  for (const input of ui.modeInputs) {
+    input.checked = input.value === state.streamMode;
+    input.addEventListener('change', () => {
+      if (!input.checked || state.stream || state.starting) return;
+      state.streamMode = input.value;
+      localStorage.setItem(STREAM_MODE_KEY, state.streamMode);
+      for (const viewer of state.viewers.values()) viewer.autoState = createAutoState();
+      renderQualityHint();
+      renderViewers();
+    });
+  }
 }
 
 function currentPreset() {
@@ -300,7 +392,7 @@ function currentPreset() {
 
 function createAutoState() {
   return {
-    step: AUTO_START_STEP,
+    step: currentStreamMode().startStep,
     badSamples: 0,
     cleanSinceTs: null,
     cooldownUntilTs: 0,
@@ -311,12 +403,12 @@ function createAutoState() {
 
 function presetForViewer({ viewer }) {
   const selected = currentPreset();
-  return selected.auto ? AUTO_LADDER[viewer.autoState.step] : selected;
+  return selected.auto ? currentStreamMode().ladder[viewer.autoState.step] : selected;
 }
 
 function updateAutoStep({ viewer, stats }) {
   const auto = viewer.autoState;
-  const step = AUTO_LADDER[auto.step];
+  const step = currentStreamMode().ladder[auto.step];
   const now = performance.now();
   const lossBad = (stats.fractionLost ?? 0) > AUTO_LOSS_LIMIT;
   const cpuBad = stats.qualityLimitationReason === 'cpu';
@@ -329,7 +421,7 @@ function updateAutoStep({ viewer, stats }) {
   if (lossBad || cpuBad || bandwidthBad) {
     auto.badSamples += 1;
     auto.cleanSinceTs = null;
-    if (auto.badSamples >= AUTO_BAD_SAMPLES && auto.step < AUTO_LADDER.length - 1) {
+    if (auto.badSamples >= AUTO_BAD_SAMPLES && auto.step < currentStreamMode().ladder.length - 1) {
       auto.step += 1;
       auto.badSamples = 0;
       // Scheitert ein Aufstieg sofort wieder, den nächsten Versuch immer weiter
@@ -355,7 +447,7 @@ function updateAutoStep({ viewer, stats }) {
 
 function applyQuality({ viewer }) {
   const preset = presetForViewer({ viewer });
-  for (const sender of viewer.pc.getSenders()) {
+  for (const sender of viewer.pc?.getSenders() ?? []) {
     if (sender.track?.kind !== 'video') continue;
     const captureHeight = sender.track.getSettings().height;
     const scale = preset.height && captureHeight ? Math.max(1, captureHeight / preset.height) : 1;
@@ -366,8 +458,8 @@ function applyQuality({ viewer }) {
       maxFramerate: preset.maxFramerate,
       scaleResolutionDownBy: scale,
     });
-    params.degradationPreference = 'maintain-resolution';
-    sender.setParameters(params).catch(() => {});
+    params.degradationPreference = currentStreamMode().degradationPreference;
+    sender.setParameters(params).catch((err) => console.warn('Qualitätseinstellungen nicht angewendet', err));
   }
 }
 
@@ -380,15 +472,14 @@ function applyQualityToAll() {
 function renderQualityHint() {
   const preset = currentPreset();
   if (preset.auto) {
-    ui.qualityHint.textContent =
-      'Regelt pro Tablet selbst nach: bei Engpässen erst weniger fps, dann kleinere Auflösung ' +
-      '(nativ/30 → nativ/15 → 1080p/30 → …) – und automatisch wieder hoch, sobald Luft ist. ' +
-      'Die aktuelle Stufe steht in der Tablet-Liste.';
+    ui.qualityHint.textContent = state.streamMode === 'motion'
+      ? 'Automatisch pro Tablet: möglichst 30 fps für Videos. Bei Engpässen zuerst kleinere Auflösung, erst auf der kleinsten Stufe 15 fps.'
+      : 'Automatisch pro Tablet: scharfe Details für Text und Präsentationen. Bei Engpässen zuerst weniger fps, danach kleinere Auflösung.';
     return;
   }
   ui.qualityHint.textContent =
     `Max. ${formatBitrate({ bits: preset.maxBitrate })} pro Tablet – Gesamtlast im WLAN ist ` +
-    '„pro Tablet × Anzahl Tablets“. Wechsel wirkt sofort, ohne die Übertragung neu zu starten.';
+    '„pro Tablet × Anzahl Tablets“. Feste fps- und Auflösungsgrenzen gelten auch für die gewählte Priorität. Wechsel wirkt sofort.';
 }
 
 function initQualitySelect() {
@@ -418,10 +509,11 @@ function initQualitySelect() {
 async function handleViewerSignal({ viewerId, payload }) {
   const viewer = state.viewers.get(viewerId);
   const pc = viewer?.pc;
-  if (!pc) return;
+  if (!pc || !payload || payload.negotiationId !== viewer.negotiationId) return;
   try {
-    if (payload.sdp) {
+    if (payload.sdp?.type === 'answer') {
       await pc.setRemoteDescription(payload.sdp);
+      if (viewer.pc !== pc) return;
       // Kandidaten nachschieben, die während setRemoteDescription eingetroffen sind.
       for (const candidate of viewer.pendingCandidates.splice(0)) {
         pc.addIceCandidate(candidate).catch(() => {});
@@ -435,6 +527,7 @@ async function handleViewerSignal({ viewerId, payload }) {
     }
   } catch (err) {
     console.warn('Signal-Fehler', err);
+    retryViewer({ viewerId, viewer, pc });
   }
 }
 
@@ -444,7 +537,10 @@ setInterval(async () => {
   let anyRelay = false;
   for (const viewer of state.viewers.values()) {
     if (!viewer.pc || viewer.pc.connectionState !== 'connected') continue;
-    const stats = await readConnectionStats({ pc: viewer.pc });
+    const pc = viewer.pc;
+    let stats;
+    try { stats = await readConnectionStats({ pc }); } catch { continue; }
+    if (viewer.pc !== pc) continue;
     if (viewer.lastBytesSent != null && stats.bytesSent != null) {
       const seconds = (stats.timestamp - viewer.lastTimestamp) / 1000;
       stats.bitrate = ((stats.bytesSent - viewer.lastBytesSent) * 8) / seconds;
@@ -485,7 +581,7 @@ function renderViewers() {
       const stats = viewer.stats;
       const path = stats?.path ? PATH_LABELS[stats.path] : null;
       const ledClass = viewer.status === 'verbunden' ? 'ok' : viewer.status === 'wartet' ? '' : 'warn';
-      const autoStep = currentPreset().auto && viewer.pc ? AUTO_LADDER[viewer.autoState.step].label : null;
+      const autoStep = currentPreset().auto && viewer.pc ? currentStreamMode().ladder[viewer.autoState.step].label : null;
       return `<tr>
         <td><span class="led ${ledClass}"></span></td>
         <td class="name">${escapeHtml({ text: viewerDisplayName({ viewer }) })}</td>
@@ -500,5 +596,6 @@ function renderViewers() {
     .join('');
 }
 
+initStreamMode();
 initQualitySelect();
 signaling.connect();

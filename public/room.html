@@ -34,6 +34,20 @@
 
         <section class="card">
           <h2>Übertragung</h2>
+          <fieldset class="stream-mode" id="stream-mode" aria-describedby="stream-mode-hint">
+            <legend>Priorität</legend>
+            <div class="mode-options">
+              <label class="mode-option">
+                <input type="radio" name="stream-mode" value="motion" checked />
+                <span><strong>Flüssige Bewegung</strong><small>Für Videos · FPS bevorzugen</small></span>
+              </label>
+              <label class="mode-option">
+                <input type="radio" name="stream-mode" value="detail" />
+                <span><strong>Hohe Bildschärfe</strong><small>Für Text und Präsentationen</small></span>
+              </label>
+            </div>
+          </fieldset>
+          <p class="hint" id="stream-mode-hint">Vor dem Start wählen. Für einen Wechsel die Übertragung beenden.</p>
           <button class="btn btn-primary" id="share-btn" disabled>▶&nbsp;&nbsp;Bildschirm teilen</button>
           <button class="btn btn-danger" id="stop-btn" hidden>■&nbsp;&nbsp;Übertragung beenden</button>
           <label class="select-row">
