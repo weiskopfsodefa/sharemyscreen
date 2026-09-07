@@ -27,13 +27,26 @@
           <p class="join-url" id="join-url">Raum wird erstellt…</p>
           <button class="btn btn-ghost" id="copy-link" disabled>Link kopieren</button>
           <p class="hint">
-            Tablets scannen den QR-Code oder öffnen den Link – das ist dieselbe
-            Adresse wie oben in deiner Adresszeile.
+            Tablets scannen den QR-Code oder öffnen den Link.
+            Am Host steuerst du die Übertragung auf dieser Seite.
           </p>
         </section>
 
         <section class="card">
           <h2>Übertragung</h2>
+          <label class="select-row transport-row">
+            Übertragungsweg
+            <select id="transport-select">
+              <option value="direct">Direkt</option>
+              <option value="livekit">Lokaler Medienserver</option>
+            </select>
+          </label>
+          <p class="hint" id="transport-hint">Direkt vom Laptop zu jedem Tablet.</p>
+          <p class="hint" id="local-launcher" hidden>
+            Bitte den lokalen Starter auf diesem Laptop ausführen, dann
+            <a href="http://localhost:3210/host">lokale Host-Seite öffnen</a>.
+            <a href="https://github.com/weiskopfsodefa/sharemyscreen#lokaler-medienserver-optional" target="_blank" rel="noopener">Einrichtung</a>
+          </p>
           <fieldset class="stream-mode" id="stream-mode" aria-describedby="stream-mode-hint">
             <legend>Priorität</legend>
             <div class="mode-options">

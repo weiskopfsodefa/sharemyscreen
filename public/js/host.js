@@ -1,3 +1,4 @@
+import { MediaClient } from './media-client.js';
 import { SignalingClient } from './signaling.js';
 import { createPeerConnection, readConnectionStats, formatBitrate, PATH_LABELS } from './webrtc.js';
 
@@ -68,6 +69,9 @@ const ui = {
   copyLink: document.getElementById('copy-link'),
   shareBtn: document.getElementById('share-btn'),
   stopBtn: document.getElementById('stop-btn'),
+  transportSelect: document.getElementById('transport-select'),
+  transportHint: document.getElementById('transport-hint'),
+  localLauncher: document.getElementById('local-launcher'),
   streamMode: document.getElementById('stream-mode'),
   modeInputs: [...document.querySelectorAll('input[name="stream-mode"]')],
   qualitySelect: document.getElementById('quality-select'),
@@ -87,6 +91,11 @@ const state = {
   hostToken: null,
   stream: null,
   starting: false,
+  media: null,
+  mediaSession: null,
+  mediaClient: null,
+  mediaParticipants: new Set(),
+  startGeneration: 0,
   streamMode: DEFAULT_STREAM_MODE,
   /** @type {Map<string, {pc: RTCPeerConnection|null, label: string, status: string, stats: object|null, lastBytesSent: number|null, lastTimestamp: number|null}>} */
   viewers: new Map(),
@@ -101,7 +110,7 @@ const signaling = new SignalingClient({
     if (saved) {
       state.code = saved.code;
       state.hostToken = saved.hostToken;
-      signaling.send({ message: { type: 'host:reclaim', code: saved.code, hostToken: saved.hostToken } });
+      signaling.send({ message: { type: 'host:reclaim', code: saved.code, hostToken: saved.hostToken, transport: state.mediaSession ? { mode: 'livekit', session: state.mediaSession } : { mode: 'direct' } } });
     } else {
       signaling.send({ message: { type: 'host:create' } });
     }
@@ -127,9 +136,11 @@ const MESSAGE_HANDLERS = {
   'host:created': ({ message }) => {
     state.code = message.code;
     state.hostToken = message.hostToken;
+    state.media = message.media;
+
     localStorage.setItem(tokenKey({ code: message.code }), message.hostToken);
     localStorage.setItem(LAST_ROOM_KEY, message.code);
-    // Die Adresszeile des Hosts IST der Beitritts-Link.
+    // Raumcode im Pfad behalten; lokal verwendet der QR-Code die LAN-Adresse.
     if (location.pathname !== `/${message.code}`) {
       history.replaceState(null, '', `/${message.code}`);
     }
@@ -158,20 +169,30 @@ const MESSAGE_HANDLERS = {
 };
 
 function renderRoom() {
-  const joinUrl = `${location.origin}/${state.code}`;
+  const joinUrl = `${state.media?.publicOrigin || location.origin}/${state.code}`;
   ui.roomCode.textContent = state.code;
   ui.joinUrl.textContent = joinUrl;
   ui.copyLink.disabled = false;
-  ui.shareBtn.disabled = state.starting;
+  renderTransport();
   ui.qrImg.src = `/qr.svg?text=${encodeURIComponent(joinUrl)}`;
   ui.qrImg.hidden = false;
 }
 
 ui.copyLink.addEventListener('click', async () => {
-  await navigator.clipboard.writeText(`${location.origin}/${state.code}`);
+  await navigator.clipboard.writeText(ui.joinUrl.textContent);
   ui.copyLink.textContent = 'Kopiert ✓';
   setTimeout(() => (ui.copyLink.textContent = 'Link kopieren'), 1500);
 });
+
+function renderTransport() {
+  const media = ui.transportSelect.value === 'livekit';
+  ui.localLauncher.hidden = !media || Boolean(state.media?.available);
+  ui.shareBtn.disabled = state.starting || !state.code || (media && !state.media?.available);
+  ui.transportHint.textContent = media
+    ? state.media?.available ? 'Ein gemeinsamer Stream über LiveKit im LAN. Qualität gilt für alle Tablets.' : 'Der Medienserver benötigt den lokalen Starter auf diesem Laptop.'
+    : 'Direkt vom Laptop zu jedem Tablet.';
+}
+ui.transportSelect.addEventListener('change', () => { renderTransport(); renderQualityHint(); });
 
 // --- Bildschirm teilen ---
 
@@ -180,37 +201,94 @@ ui.stopBtn.addEventListener('click', stopShare);
 
 async function startShare() {
   if (state.starting || state.stream) return;
+  const useMedia = ui.transportSelect.value === 'livekit';
+  if (useMedia && !state.media?.available) return;
+  const generation = ++state.startGeneration;
   state.starting = true;
   ui.shareBtn.disabled = true;
   ui.streamMode.disabled = true;
+  ui.transportSelect.disabled = true;
+  ui.qualitySelect.disabled = useMedia;
   let stream;
   try {
+    const preset = currentPreset().auto ? { height: 720, maxFramerate: 30, maxBitrate: 2_000_000 } : currentPreset();
     stream = await navigator.mediaDevices.getDisplayMedia({ video: CAPTURE_VIDEO });
-  } catch {
-    return; // Nutzer hat den Dialog abgebrochen.
+    if (generation !== state.startGeneration) { stream.getTracks().forEach(track => track.stop()); return; }
+    state.stream = stream;
+    const [videoTrack] = stream.getVideoTracks();
+    videoTrack.contentHint = currentStreamMode().contentHint;
+    videoTrack.addEventListener('ended', stopShare);
+    ui.preview.srcObject = stream;
+    ui.preview.classList.add('visible');
+    ui.shareBtn.hidden = true;
+    ui.stopBtn.hidden = false;
+    ui.onairBadge.classList.add('onair');
+    ui.onairText.textContent = useMedia ? 'Verbinde…' : 'ON AIR';
+
+    if (useMedia) {
+      await videoTrack.applyConstraints({
+        ...(preset.height ? { height: { ideal: preset.height, max: preset.height } } : {}),
+        frameRate: { ideal: preset.maxFramerate, max: preset.maxFramerate },
+      });
+      if (generation !== state.startGeneration) return;
+      const { transport } = await signaling.request({ type: 'host:transport', mode: 'livekit' });
+      if (generation !== state.startGeneration) return;
+      state.mediaSession = transport.session;
+      state.mediaClient = new MediaClient({
+        credentials: () => signaling.request({ type: 'media:token', session: state.mediaSession }),
+        track: videoTrack,
+        publishOptions: {
+          screenShareEncoding: { maxBitrate: preset.maxBitrate, maxFramerate: preset.maxFramerate },
+          degradationPreference: currentStreamMode().degradationPreference,
+        },
+        onStatus: status => {
+          ui.onairText.textContent = status === 'connected' ? 'ON AIR' : 'Verbinde…';
+          ui.transportHint.textContent = status === 'connected'
+            ? 'LiveKit verbunden · ein gemeinsamer Stream im LAN. Geräte-Status zeigt die Verbindung zum Medienserver.'
+            : 'Medienserver nicht verbunden – versuche automatisch erneut. Lokalen Starter prüfen.';
+        },
+        onParticipants: participants => {
+          state.mediaParticipants = new Set(participants.map(p => p.identity));
+          for (const [id, viewer] of state.viewers) {
+            viewer.status = state.mediaParticipants.has(id) ? 'verbunden' : 'wartet';
+            if (!viewer.signalingOnline && !state.mediaParticipants.has(id)) state.viewers.delete(id);
+          }
+          renderViewers();
+        },
+      });
+      state.mediaClient.start();
+    } else {
+      for (const viewerId of state.viewers.keys()) connectViewer({ viewerId });
+    }
+  } catch (err) {
+    if (generation === state.startGeneration) {
+      stopShare();
+      ui.transportHint.textContent = err.name === 'NotAllowedError'
+        ? 'Bildschirmfreigabe abgebrochen oder nicht erlaubt.' : `Start fehlgeschlagen: ${err.message}`;
+    }
   } finally {
-    state.starting = false;
-    ui.shareBtn.disabled = false;
-    ui.streamMode.disabled = Boolean(stream);
-  }
-  state.stream = stream;
-  const [videoTrack] = stream.getVideoTracks();
-  videoTrack.contentHint = currentStreamMode().contentHint;
-  videoTrack.addEventListener('ended', stopShare);
-
-  ui.preview.srcObject = stream;
-  ui.preview.classList.add('visible');
-  ui.shareBtn.hidden = true;
-  ui.stopBtn.hidden = false;
-  ui.onairBadge.classList.add('onair');
-  ui.onairText.textContent = 'ON AIR';
-
-  for (const viewerId of state.viewers.keys()) {
-    connectViewer({ viewerId });
+    if (generation === state.startGeneration) {
+      state.starting = false;
+      ui.shareBtn.disabled = false;
+      ui.streamMode.disabled = Boolean(state.stream);
+      ui.transportSelect.disabled = Boolean(state.stream);
+      ui.qualitySelect.disabled = useMedia && Boolean(state.stream);
+    }
   }
 }
 
 function stopShare() {
+  ++state.startGeneration;
+  state.starting = false;
+  const hadMedia = state.mediaSession || ui.transportSelect.value === 'livekit';
+  state.mediaClient?.stop();
+  state.mediaClient = null;
+  state.mediaSession = null;
+  state.mediaParticipants.clear();
+  if (hadMedia) signaling.request({ type: 'host:transport', mode: 'direct' }).catch(() => {});
+  ui.transportSelect.disabled = false;
+  ui.qualitySelect.disabled = false;
+  ui.shareBtn.disabled = false;
   state.stream?.getTracks().forEach((track) => track.stop());
   state.stream = null;
   ui.streamMode.disabled = false;
@@ -229,6 +307,7 @@ function stopShare() {
   ui.stopBtn.hidden = true;
   ui.onairBadge.classList.remove('onair');
   ui.onairText.textContent = 'Bereit';
+  renderTransport();
   renderViewers();
 }
 
@@ -253,6 +332,11 @@ function addViewer({ viewerId, name, needsOffer = true }) {
     viewer.name = name;
   }
   viewer.signalingOnline = true;
+  if (state.mediaSession) {
+    viewer.status = state.mediaParticipants.has(viewerId) ? 'verbunden' : 'wartet';
+    renderViewers();
+    return;
+  }
   // Laufenden Aufbau nicht durch doppelte Join-/Reclaim-Nachrichten ersetzen.
   const connecting = viewer.pc && ['new', 'connecting'].includes(viewer.pc.connectionState);
   const unusable = !viewer.pc || ['failed', 'closed', 'disconnected'].includes(viewer.pc.connectionState);
@@ -267,7 +351,7 @@ function removeViewer({ viewerId }) {
   clearTimeout(viewer.retryTimer);
   // Ein WS-Abbruch sagt nichts über die lokale Videoverbindung aus.
   // Solange diese lebt, behalten wir sie auch bei längerem Serverausfall.
-  if (!viewer.pc) state.viewers.delete(viewerId);
+  if (!viewer.pc && !state.mediaParticipants.has(viewerId)) state.viewers.delete(viewerId);
   renderViewers();
 }
 
@@ -294,7 +378,7 @@ function retryViewer({ viewerId, viewer, pc }) {
 
 async function connectViewer({ viewerId }) {
   const viewer = state.viewers.get(viewerId);
-  if (!viewer || !state.stream || !viewer.signalingOnline) return;
+  if (!viewer || !state.stream || !viewer.signalingOnline || ui.transportSelect.value === 'livekit') return;
   clearTimeout(viewer.retryTimer);
   clearTimeout(viewer.connectTimer);
   clearTimeout(viewer.disconnectTimer);
@@ -471,6 +555,10 @@ function applyQualityToAll() {
 
 function renderQualityHint() {
   const preset = currentPreset();
+  if (ui.transportSelect.value === 'livekit') {
+    ui.qualityHint.textContent = 'Gemeinsame Qualität für alle Tablets. Automatisch startet mit bis zu 720p / 30 fps; der Browser passt gemäß Priorität an. Zum Ändern die Übertragung beenden.';
+    return;
+  }
   if (preset.auto) {
     ui.qualityHint.textContent = state.streamMode === 'motion'
       ? 'Automatisch pro Tablet: möglichst 30 fps für Videos. Bei Engpässen zuerst kleinere Auflösung, erst auf der kleinsten Stufe 15 fps.'

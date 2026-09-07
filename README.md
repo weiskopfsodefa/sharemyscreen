@@ -105,3 +105,119 @@ des Anbieters setzen. Kein Build-Schritt.
 WebRTC-/WebSocket-Schnittstellen. Echte WLAN-Störungen und Medienwiedergabe müssen
 zusätzlich mit den Zielgeräten getestet werden. Nach einem Update Host und Tablets
 neu laden, damit alle dieselbe Signaling-Version verwenden.
+
+## Lokaler Medienserver (optional)
+
+Vor dem Start gibt es zwei unabhängige Einstellungen: **Übertragungsweg**
+(Direkt / Lokaler Medienserver) und **Priorität** (Bewegung / Bildschärfe).
+`npm start` und das bestehende Deployment bleiben standardmäßig im Direktmodus;
+LiveKit ist dafür nicht erforderlich. Auf der gehosteten Seite verweist der
+Medienserver-Modus auf die lokale Host-Seite. Es wird keine unsichere Verbindung
+von einer öffentlichen HTTPS-Seite zu einem lokalen HTTP-Dienst vorausgesetzt.
+Die lokalen Räume und ihre QR-Codes sind unabhängig von den gehosteten Räumen.
+
+### Einmalige Einrichtung auf dem Host
+
+Benötigt werden Node.js ab Version 20, dieses Repository (`npm ci`) und
+[LiveKit Server](https://docs.livekit.io/transport/self-hosting/local/).
+Auf den Tablets wird **nichts installiert**.
+
+- **macOS:** `brew install livekit`
+- **Windows:** das zur CPU passende ZIP der
+  [offiziellen Releases](https://github.com/livekit/livekit/releases/latest)
+  entpacken. `livekit-server.exe` in den PATH aufnehmen oder `LIVEKIT_BIN` auf
+  den absoluten Pfad der EXE setzen.
+
+### Starten
+
+```bash
+npm run start:local
+```
+
+Alternativ `start-local.command` (macOS) bzw. `start-local.cmd` (Windows) öffnen.
+Der Starter startet **LiveKit und unsere Web-App zusammen**. Danach am Host
+[localhost:3210/host](http://localhost:3210/host) öffnen, „Lokaler Medienserver“
+auswählen und Bildschirm teilen. Die Tablets scannen den dort angezeigten QR-Code.
+Die Host-Adresse `localhost` ist absichtlich anders als die LAN-Adresse im QR-Code.
+Zum Beenden im Starter Strg+C drücken; beide Prozesse werden beendet.
+
+Bei mehreren Netzwerkadressen nennt der Starter die möglichen Adressen und
+fordert eine Auswahl. Die Adresse des LAN-/WLAN-Adapters angeben, über den die
+Tablets erreichbar sind (nicht die VPN-Adresse):
+
+```bash
+# macOS / Linux
+LOCAL_MEDIA_IP=192.168.1.20 npm run start:local
+```
+
+```powershell
+# Windows PowerShell; Beispielpfade/-adresse durch eigene Werte ersetzen
+$env:LIVEKIT_BIN = 'C:\LiveKit\livekit-server.exe'
+$env:LOCAL_MEDIA_IP = '192.168.1.20'
+npm run start:local
+```
+
+Im privaten Netzwerk müssen TCP **3210, 7880, 7881** und UDP **7882** zum Host
+zugänglich sein. Kein Portforwarding zum Internet einrichten. Host möglichst
+per LAN-Kabel anschließen und Client-Isolation am Router ausschalten.
+
+### Lokalbetrieb und HTTPS
+
+Der Standardstarter verwendet HTTP/WS im **vertrauenswürdigen privaten LAN**.
+Der Host öffnet `localhost` als sicheren Browserkontext für die Bildschirmfreigabe;
+Tablets empfangen ausschließlich Video über ihre LAN-Adresse. Das funktioniert
+ohne Zertifikatsinstallation; im Browser kann die Seite als „nicht sicher“ markiert
+sein. Der WebRTC-Medienverkehr ist verschlüsselt, die HTTP-Seite und Signaling-
+Zugangstokens sind im Standardbetrieb jedoch nicht durch TLS geschützt.
+Wake Lock ist auf HTTP-Empfängern möglicherweise nicht verfügbar; Display-Timeout
+am Tablet entsprechend einstellen. Manche verwalteten Browser verlangen HTTPS.
+
+Für solche Netze unterstützt die App `TLS_CERT` und `TLS_KEY` (PEM-Dateien).
+Das Zertifikat muss für `localhost` und die gewählte LAN-Adresse gelten und von
+allen Geräten akzeptiert werden. Der Starter zeigt dann HTTPS-URLs an, und die
+App führt LiveKit-Signaling durch einen lokalen WSS-Proxy. Zertifikate bzw.
+Vertrauensanker werden **nicht automatisch installiert**. Der Link von der
+gehosteten Seite verwendet standardmäßig HTTP; bei TLS die ausgegebene HTTPS-
+Host-Adresse direkt öffnen.
+
+LiveKit wird mit privater Serveradresse, ohne externes IP-Discovery und ohne
+TURN betrieben. Die Medienclients verwenden keine öffentlichen STUN-Server.
+SDK und Oberfläche werden lokal ausgeliefert; lokale Seiten laden keine Webfonts
+aus dem Internet. Nach Installation ist für den Medienserver-Modus kein Internet
+nötig. Im Direktmodus bleibt die bisherige STUN-Konfiguration bestehen.
+
+### Qualität und Grenzen dieser ersten SFU-Version
+
+- Ein VP8-Videostream ohne Simulcast/zusätzlichen Backup-Codec für alle Tablets.
+  „Automatisch“ startet mit bis zu **720p / 30 fps / 2 Mbit/s**. Der Browser passt
+  entsprechend der Priorität an; die eigene P2P-Stufenautomatik ist hier inaktiv.
+- Feste Presets gelten gemeinsam für alle Empfänger. Qualität und Übertragungsweg
+  sind während des Streams gesperrt. Zum Wechseln stoppen und neu starten.
+- Zehn Tablets erhalten weiterhin zehn Kopien über das WLAN; reduziert wird die
+  Anzahl der vom Host-Browser erzeugten Streams. Ein langsamer Empfänger bekommt
+  noch keine eigene Auflösungsvariante.
+- Die Geräteliste zeigt die LiveKit-Verbindung; die bisherigen P2P-Messspalten
+  bleiben im SFU-Modus leer. Das ist keine Bestätigung störungsfreien Decodierens.
+- LiveKit übernimmt Wiederverbindungen. Nach endgültigem Abbruch holt die App
+  neue kurzlebige Tokens und versucht erneut. Ein LiveKit-Neustart wird so ebenfalls
+  abgefangen, solange die Bildschirmfreigabe im Host-Browser noch aktiv ist.
+- Der Starter speichert lokale Geheimnisse und Logs ausschließlich in `.local/`
+  (gitignored). Der LiveKit-API-Schlüssel bleibt auf dem Server; Tablets bekommen
+  nur raumgebundene Empfangstokens. Logdateien können Verbindungsdetails enthalten.
+
+### Verifikation
+
+`npm test` deckt zusätzlich Medienrechte, Sitzungswechsel, SDK-Verbindungsabbruch
+und Abbruch während des Verbindungsaufbaus ab. `npm run smoke-test` prüft weiter
+Raumverwaltung und Direkt-Signaling.
+
+Für einen Browser-Integrationstest mit bewegtem Testbild statt Bildschirmfreigabe:
+Starter auf Port 3210 laufen lassen, dann `node scripts/browser-media-test.js` und
+`http://localhost:3299/host` öffnen. Nur diese separate Testseite ersetzt die
+Bildschirmquelle durch einen Canvas. Der QR-Code führt auf die echte Viewer-App.
+Mit Stop → anderem Übertragungsweg → Start kann der Wechsel geprüft werden.
+Der Test-Proxy bindet ausschließlich an Loopback und gehört nicht zum Deployment.
+
+Vor dem Einsatz: mit 1, 3, 5 und 10 echten Tablets testen, Wiedergabeflüssigkeit,
+Verzögerung und Host-Auslastung messen, WLAN aus-/einschalten und Starter neu starten.
+Browserfenster auf einem einzigen Rechner ersetzen keinen WLAN-Lasttest.

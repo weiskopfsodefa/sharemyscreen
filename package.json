@@ -7,12 +7,15 @@
   "scripts": {
     "start": "node server.js",
     "smoke-test": "node scripts/smoke-test.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "start:local": "node scripts/local-server.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "livekit-client": "^2.22.3",
+    "livekit-server-sdk": "^2.18.0",
     "qrcode": "^1.5.4",
     "ws": "^8.18.0"
   }

@@ -585,3 +585,6 @@ body.viewer-page::before { display: none; }
   font-weight: 700;
   letter-spacing: 0.04em;
 }
+
+.transport-row { flex-wrap: wrap; margin-top: 0; }
+.transport-row select { font-size: 1rem; min-height: 44px; max-width: 100%; }
