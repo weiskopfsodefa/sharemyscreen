@@ -106,13 +106,14 @@ WebRTC-/WebSocket-Schnittstellen. Echte WLAN-Störungen und Medienwiedergabe mü
 zusätzlich mit den Zielgeräten getestet werden. Nach einem Update Host und Tablets
 neu laden, damit alle dieselbe Signaling-Version verwenden.
 
-## Host-App (Installer in Vorbereitung)
+## Host-App
 
 Die [Host-App](docs/host-app.md) bündelt Oberfläche, Laufzeit und LiveKit. Nutzer
 brauchen nach Installation kein Node.js, Go, Terminal oder separates LiveKit.
-Die Download-Seite zeigt Installer erst, sobald veröffentlichte Asset-URLs in
-`public/downloads.json` hinterlegt sind. Der PR enthält zunächst Test-Builds;
-öffentliche Signierung und Plattformabnahme stehen noch aus.
+Die Installer liegen im öffentlichen [Download-Repository](https://github.com/weiskopfsodefa/sharemyscreen-downloads/releases).
+Der Projekt-Quellcode bleibt privat. `public/downloads.json` enthält die öffentlichen
+Asset-URLs. Die Installer werden unsigniert angeboten; Plattformabnahmen für
+Windows und Intel-Macs stehen noch aus.
 
 Entwickler: `npm ci`, `npm run desktop:prepare`, `npm run desktop:dev`.
 Installer: `npm run desktop:build`. Voraussetzung fürs Bauen: Go >= 1.26 und tar.

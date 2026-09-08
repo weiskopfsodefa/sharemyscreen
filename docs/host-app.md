@@ -33,16 +33,20 @@ GitHub-Action „Host-App installers“ baut macOS (Apple Silicon/Intel) und Win
 (x64) und legt sie als Workflow-Artefakte ab. Sie veröffentlicht nichts automatisch.
 Ein Windows-Installer-Build ersetzt keinen praktischen Test auf Windows.
 
-Für Downloads an normale Endnutzer müssen vor der ersten Veröffentlichung noch
-Apple Developer-ID-Signierung plus Notarisierung und Windows-Code-Signing
-konfiguriert und die Installer auf frischen Systemen geprüft werden. Ohne diese
-Schritte können Gatekeeper/SmartScreen warnen. Zertifikate gehören in die
-CI-Secrets bzw. den lokalen Schlüsselbund, nicht ins Repository.
+Die Installer werden vorerst unsigniert veröffentlicht. macOS und Windows können
+beim Öffnen Sicherheitsmeldungen anzeigen. Signierung und Notarisierung sind
+später möglich; Laufzeittests auf Windows und Intel-Macs stehen noch aus.
 
-Nach den Plattformtests und Signierung: Version erhöhen, Installer bauen,
-GitHub-Release mit den Installern veröffentlichen und dessen echte Asset-URLs
-in `public/downloads.json` eintragen. Erst dann zeigt die Download-Seite aktive
-Download-Buttons. Keine Platzhalter-Installer oder automatischen Cloud-Dienste.
+Für eine Veröffentlichung: Version erhöhen, die drei Installer in CI bauen und
+als Release im öffentlichen Repository `weiskopfsodefa/sharemyscreen-downloads`
+hochladen. Dort liegen nur Downloads und Release-Hinweise, kein Projekt-Quellcode.
+Das eigentliche Projekt-Repository bleibt privat; dessen Release-Assets sind
+für nicht angemeldete Besucher nicht zugänglich.
+
+Nach erfolgreichem Upload das Release veröffentlichen, die Asset-URLs in
+`public/downloads.json` aktualisieren und ohne GitHub-Anmeldung prüfen.
+`public/js/download.js` akzeptiert nur Release-URLs aus dem Download-Repository.
+Anschließend die Webseite deployen und alle drei Download-Buttons kontrollieren.
 
 ## Lokal entwickeln und bauen
 

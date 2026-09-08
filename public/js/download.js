@@ -7,7 +7,7 @@ try {
   let count = 0;
   for (const [key, label] of Object.entries({ 'mac-arm64': 'macOS · Apple Silicon', 'mac-x64': 'macOS · Intel', 'windows-x64': 'Windows' })) {
     const url = downloads[key];
-    const valid = typeof url === 'string' && url.startsWith('https://github.com/weiskopfsodefa/sharemyscreen/releases/download/');
+    const valid = typeof url === 'string' && url.startsWith('https://github.com/weiskopfsodefa/sharemyscreen-downloads/releases/download/');
     const element = document.createElement(valid ? 'a' : 'button');
     element.className = 'btn btn-primary'; element.textContent = label;
     if (valid) { element.href = url; count++; } else { element.disabled = true; }
