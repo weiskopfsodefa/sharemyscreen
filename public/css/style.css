@@ -342,11 +342,30 @@ select:focus { border-color: var(--amber); }
 
 /* --- Zuschauer-Tabelle --- */
 
+.viewers-scroll { overflow-x: auto; }
+.viewers-scroll:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+
 table.viewers {
+  table-layout: fixed;
+  min-width: 60rem;
+  font-variant-numeric: tabular-nums;
   width: 100%;
   border-collapse: collapse;
   font-size: 0.9rem;
 }
+
+table.viewers .viewer-led { width: 3%; }
+table.viewers .viewer-name { width: 14%; }
+table.viewers .viewer-status { width: 18%; }
+table.viewers .viewer-path { width: 15%; }
+table.viewers .viewer-bitrate { width: 12%; }
+table.viewers .viewer-fps { width: 5%; }
+table.viewers .viewer-resolution { width: 14%; }
+table.viewers .viewer-loss { width: 10%; }
+table.viewers .viewer-ping { width: 9%; }
+
+table.viewers th:nth-child(n + 5),
+table.viewers td:nth-child(n + 5) { text-align: right; }
 
 table.viewers th {
   font-family: var(--font-mono);
@@ -367,6 +386,10 @@ table.viewers td {
   font-size: 0.85rem;
   white-space: nowrap;
 }
+
+table.viewers td:not([colspan]) { overflow: hidden; text-overflow: ellipsis; }
+
+table.viewers td:first-child:not([colspan]) { padding-inline: 0; text-align: center; }
 
 table.viewers td.name { font-family: var(--font-display); font-weight: 600; }
 

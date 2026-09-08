@@ -725,8 +725,8 @@ function renderViewers() {
       const autoStep = currentPreset().auto && viewer.pc ? currentStreamMode().ladder[viewer.autoState.step].label : null;
       return `<tr>
         <td><span class="led ${ledClass}"></span></td>
-        <td class="name">${escapeHtml({ text: viewerDisplayName({ viewer }) })}</td>
-        <td>${viewer.status}${autoStep ? ` · ${autoStep}` : ''}</td>
+        <td class="name" title="${escapeHtml({ text: viewerDisplayName({ viewer }) })}">${escapeHtml({ text: viewerDisplayName({ viewer }) })}</td>
+        <td title="${escapeHtml({ text: `${viewer.status}${autoStep ? ` · ${autoStep}` : ''}` })}">${viewer.status}${autoStep ? ` · ${autoStep}` : ''}</td>
         <td>${media ? '<span class="chip ok">MEDIENSERVER</span>' : path ? `<span class="chip ${path.css}" title="${path.hint}">${path.text}</span>` : '–'}</td>
         <td>${formatBitrate({ bits: stats?.bitrate ?? null })}</td>
         <td>${stats?.framesPerSecond != null ? Math.round(stats.framesPerSecond) : '–'}</td>

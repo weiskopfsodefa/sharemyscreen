@@ -86,7 +86,19 @@
       <section class="card">
         <h2>Tablets <span id="viewer-count"></span></h2>
         <p class="hint">Im Medienserver-Modus: Empfangswerte der Tablets, etwa alle 3 Sekunden. Ping misst Tablet ↔ Medienserver. Ohne aktuelle Messung erscheint „–“.</p>
+        <div class="viewers-scroll" tabindex="0" role="region" aria-label="Verbindungswerte der Tablets">
         <table class="viewers">
+          <colgroup>
+            <col class="viewer-led" />
+            <col class="viewer-name" />
+            <col class="viewer-status" />
+            <col class="viewer-path" />
+            <col class="viewer-bitrate" />
+            <col class="viewer-fps" />
+            <col class="viewer-resolution" />
+            <col class="viewer-loss" />
+            <col class="viewer-ping" />
+          </colgroup>
           <thead>
             <tr>
               <th></th>
@@ -104,6 +116,7 @@
             <tr class="empty-row"><td colspan="9">Noch keine Tablets verbunden – QR-Code scannen.</td></tr>
           </tbody>
         </table>
+        </div>
       </section>
 
       <p class="statusline"><span class="led" id="ws-led"></span><span id="ws-status">Verbinde mit Server…</span></p>
