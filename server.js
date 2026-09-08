@@ -1,14 +1,24 @@
+import { sanitizeMediaStats } from './public/js/media-stats.js';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WebSocketServer } from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
 import QRCode from 'qrcode';
+import https from 'node:https';
+import { mediaConfig, mediaToken } from './media-config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT) || 3000;
+const MEDIA = mediaConfig();
+if (Boolean(process.env.TLS_CERT) !== Boolean(process.env.TLS_KEY)) throw new Error('TLS_CERT und TLS_KEY müssen zusammen gesetzt sein.');
+const TLS = process.env.TLS_CERT && process.env.TLS_KEY
+  ? { cert: fs.readFileSync(process.env.TLS_CERT), key: fs.readFileSync(process.env.TLS_KEY) } : null;
+const publicOrigin = MEDIA ? `${TLS ? 'https' : 'http'}://${MEDIA.ip}:${PORT}` : null;
+const mediaInfo = () => ({ available: Boolean(MEDIA), publicOrigin });
+const transportInfo = (room) => room.transport || { mode: 'direct' };
 
 // Raum bleibt nach Host-Disconnect kurz bestehen, damit ein Reload den Raum behalten kann.
 const ROOM_GRACE_MS = 5 * 60 * 1000;
@@ -35,6 +45,7 @@ function hostTokenFor({ code }) {
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
@@ -86,7 +97,7 @@ function handleHostCreate({ socket }) {
   const code = generateRoomCode();
   rooms.set(code, { hostSocket: socket, viewers: new Map(), closeTimer: null });
   socket.meta = { role: 'host', code };
-  send({ socket, message: { type: 'host:created', code, hostToken: hostTokenFor({ code }) } });
+  send({ socket, message: { type: 'host:created', code, hostToken: hostTokenFor({ code }), media: mediaInfo() } });
 }
 
 function handleHostReclaim({ socket, message }) {
@@ -110,9 +121,13 @@ function handleHostReclaim({ socket, message }) {
     clearTimeout(room.closeTimer);
     room.closeTimer = null;
   }
+  if (message.transport?.mode === 'direct') room.transport = { mode: 'direct' };
+  else if (MEDIA && message.transport?.mode === 'livekit' && /^[a-f0-9-]{36}$/.test(message.transport.session || '')) {
+    room.transport = { mode: 'livekit', session: message.transport.session };
+  }
   room.hostSocket = socket;
   socket.meta = { role: 'host', code };
-  send({ socket, message: { type: 'host:created', code, hostToken } });
+  send({ socket, message: { type: 'host:created', code, hostToken, media: mediaInfo() } });
   broadcastToViewers({ room, message: { type: 'host:online' } });
   for (const [viewerId, viewerSocket] of room.viewers) {
     // Bekannte Viewer haben evtl. noch laufende P2P-Verbindungen – kein neues
@@ -148,7 +163,7 @@ function handleViewerJoin({ socket, message }) {
   const name = sanitizeName({ name: message.name });
   room.viewers.set(viewerId, socket);
   socket.meta = { role: 'viewer', code, viewerId, name };
-  send({ socket, message: { type: 'viewer:joined', viewerId, hostOnline: Boolean(room.hostSocket) } });
+  send({ socket, message: { type: 'viewer:joined', viewerId, hostOnline: Boolean(room.hostSocket), transport: transportInfo(room) } });
   send({ socket: room.hostSocket, message: { type: 'viewer:joined', viewerId, name, needsOffer: message.needsOffer !== false } });
 }
 
@@ -166,6 +181,7 @@ function handleSignal({ socket, message }) {
   if (!meta) return;
   const room = rooms.get(meta.code);
   if (!room) return;
+  if (room.transport?.mode === 'livekit') return;
   if (meta.role === 'host') {
     if (room.hostSocket !== socket) return;
     const viewerSocket = room.viewers.get(message.to);
@@ -193,7 +209,49 @@ function handleDisconnect({ socket }) {
   }
 }
 
+async function handleTransport({ socket, message }) {
+  const meta = socket.meta;
+  const room = rooms.get(meta?.code);
+  const reply = (data) => send({ socket, message: { type: 'reply', replyTo: message.requestId, ...data } });
+  if (!room || meta.role !== 'host' || room.hostSocket !== socket) return reply({ error: 'Nur der Host kann den Übertragungsweg ändern.' });
+  if (!['direct', 'livekit'].includes(message.mode)) return reply({ error: 'Ungültiger Übertragungsweg.' });
+  if (message.mode === 'livekit' && !MEDIA) return reply({ error: 'Bitte die Host-App oder den lokalen Starter öffnen.' });
+  // Host darf nach Signaling-Neustart seine bestehende Mediensitzung wiederherstellen.
+  const session = /^[a-f0-9-]{36}$/.test(message.session || '') ? message.session : crypto.randomUUID();
+  room.transport = message.mode === 'livekit' ? { mode: 'livekit', session } : { mode: 'direct' };
+  broadcastToViewers({ room, message: { type: 'room:transport', transport: room.transport } });
+  reply({ transport: room.transport });
+}
+
+async function handleMediaToken({ socket, message }) {
+  const meta = socket.meta;
+  const room = rooms.get(meta?.code);
+  const current = () => room && rooms.get(meta.code) === room && (meta.role === 'host'
+    ? room.hostSocket === socket : room.viewers.get(meta.viewerId) === socket);
+  const reply = (data) => send({ socket, message: { type: 'reply', replyTo: message.requestId, ...data } });
+  if (!MEDIA || !current() || room.transport?.mode !== 'livekit' || message.session !== room.transport.session) {
+    return reply({ error: 'Mediensitzung nicht aktiv. Verbinde erneut.' });
+  }
+  const token = await mediaToken(MEDIA, { ...meta, session: message.session });
+  if (!current() || room.transport?.session !== message.session) return;
+  reply({ token, url: TLS ? `wss://${MEDIA.ip}:${PORT}/livekit` : `ws://${MEDIA.ip}:7880` });
+}
+
+function handleMediaStats({ socket, message }) {
+  const meta = socket.meta;
+  const room = rooms.get(meta?.code);
+  if (meta?.role !== 'viewer' || room?.viewers.get(meta.viewerId) !== socket
+    || room.transport?.mode !== 'livekit' || message.session !== room.transport.session) return;
+  send({ socket: room.hostSocket, message: {
+    type: 'media:stats', viewerId: meta.viewerId, session: room.transport.session,
+    stats: sanitizeMediaStats(message.stats),
+  } });
+}
+
 const MESSAGE_HANDLERS = {
+  'media:stats': handleMediaStats,
+  'host:transport': handleTransport,
+  'media:token': handleMediaToken,
   ping: ({ socket }) => send({ socket, message: { type: 'pong' } }),
   'host:create': handleHostCreate,
   'host:reclaim': handleHostReclaim,
@@ -207,6 +265,7 @@ const MESSAGE_HANDLERS = {
 const ROUTE_FILES = {
   '/': 'index.html',
   '/host': 'room.html',
+  '/download': 'download.html',
 };
 
 function resolveStaticFile({ urlPath }) {
@@ -238,7 +297,7 @@ function serveQrCode({ url, res }) {
   });
 }
 
-const server = http.createServer((req, res) => {
+const handleHttp = (req, res) => {
   let url;
   let urlPath;
   try {
@@ -251,11 +310,22 @@ const server = http.createServer((req, res) => {
     res.end('Bad Request');
     return;
   }
+  if (MEDIA && TLS && req.method === 'GET' && /^\/livekit\/rtc(?:\/v\d+)?\/validate$/.test(urlPath)) {
+    fetch(`http://127.0.0.1:7880${urlPath.slice('/livekit'.length)}${url.search}`, { signal: AbortSignal.timeout(5000) })
+      .then(async upstream => {
+        const body = await upstream.text();
+        res.writeHead(upstream.status, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+        res.end(body);
+      }).catch(() => { res.writeHead(502); res.end('LiveKit nicht erreichbar'); });
+    return;
+  }
   if (urlPath === '/qr.svg') {
     serveQrCode({ url, res });
     return;
   }
-  const filePath = resolveStaticFile({ urlPath });
+  const filePath = urlPath === '/vendor/livekit.mjs'
+    ? path.join(__dirname, 'node_modules/livekit-client/dist/livekit-client.esm.mjs')
+    : resolveStaticFile({ urlPath });
   if (!filePath) {
     res.writeHead(403);
     res.end('Forbidden');
@@ -268,17 +338,45 @@ const server = http.createServer((req, res) => {
       return;
     }
     const ext = path.extname(filePath).toLowerCase();
+    if (MEDIA && ext === '.html') {
+      // Offline mode does not contact Google Fonts; use the existing fallback fonts.
+      data = Buffer.from(data.toString().replace(/<link[^>]+https:\/\/fonts\.(?:googleapis|gstatic)\.com[^>]*>/g, ''));
+    }
     res.writeHead(200, {
       'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
       'Cache-Control': 'no-cache',
     });
     res.end(data);
   });
-});
+};
+export const server = TLS ? https.createServer(TLS, handleHttp) : http.createServer(handleHttp);
 
 // --- WebSocket-Signaling ---
 
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_WS_PAYLOAD_BYTES });
+const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD_BYTES });
+const mediaProxy = new WebSocketServer({ noServer: true });
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/ws') return wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws));
+  if (MEDIA && TLS && url.pathname.startsWith('/livekit/')) {
+    return mediaProxy.handleUpgrade(req, socket, head, (client) => {
+      const upstream = new WebSocket(`ws://127.0.0.1:7880${url.pathname.slice('/livekit'.length)}${url.search}`);
+      const pending = [];
+      client.on('message', (data, binary) => {
+        if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary });
+        else if (pending.length < 32) pending.push([data, binary]);
+        else client.close();
+      });
+      upstream.on('open', () => pending.splice(0).forEach(([data, binary]) => upstream.send(data, { binary })));
+      upstream.on('message', (data, binary) => { if (client.readyState === WebSocket.OPEN) client.send(data, { binary }); });
+      client.on('close', () => upstream.close());
+      upstream.on('close', () => client.close());
+      client.on('error', () => upstream.close());
+      upstream.on('error', () => client.close());
+    });
+  }
+  socket.destroy();
+});
 
 wss.on('error', (err) => console.error('WebSocket-Server-Fehler', err));
 
@@ -298,7 +396,11 @@ wss.on('connection', (socket) => {
     }
     if (!message || typeof message.type !== 'string') return;
     const handler = MESSAGE_HANDLERS[message.type];
-    if (handler) handler({ socket, message });
+    if (typeof handler === 'function') {
+      Promise.resolve().then(() => handler({ socket, message })).catch(() => {
+        send({ socket, message: { type: 'reply', replyTo: message.requestId, error: 'Server-Anfrage fehlgeschlagen.' } });
+      });
+    }
   });
   socket.on('close', () => handleDisconnect({ socket }));
 });
@@ -314,6 +416,6 @@ setInterval(() => {
   }
 }, HEARTBEAT_INTERVAL_MS).unref();
 
-server.listen(PORT, () => {
-  console.log(`sharemyscreen läuft auf http://localhost:${PORT}`);
+server.listen(PORT, process.env.BIND_ADDRESS || '0.0.0.0', () => {
+  console.log(`sharemyscreen läuft auf ${TLS ? 'https' : 'http'}://localhost:${PORT}`);
 });

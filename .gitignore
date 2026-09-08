@@ -1,2 +1,8 @@
 node_modules/
 .DS_Store
+
+.local/
+
+.cache/
+desktop-resources/
+dist-desktop/

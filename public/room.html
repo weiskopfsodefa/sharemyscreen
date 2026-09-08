@@ -27,13 +27,33 @@
           <p class="join-url" id="join-url">Raum wird erstellt…</p>
           <button class="btn btn-ghost" id="copy-link" disabled>Link kopieren</button>
           <p class="hint">
-            Tablets scannen den QR-Code oder öffnen den Link – das ist dieselbe
-            Adresse wie oben in deiner Adresszeile.
+            Tablets scannen den QR-Code oder öffnen den Link.
+            Am Host steuerst du die Übertragung auf dieser Seite.
           </p>
         </section>
 
         <section class="card">
           <h2>Übertragung</h2>
+          <fieldset class="stream-mode" id="transport-mode" aria-describedby="transport-hint">
+            <legend>Übertragungsweg</legend>
+            <div class="mode-options">
+              <label class="mode-option">
+                <input type="radio" name="transport-mode" value="direct" checked />
+                <span><strong>Direkt</strong><small>Vom Laptop zu jedem Tablet</small></span>
+              </label>
+              <label class="mode-option">
+                <input type="radio" name="transport-mode" value="livekit" />
+                <span><strong>Lokaler Medienserver</strong><small>Qualität pro Tablet · im WLAN</small></span>
+              </label>
+            </div>
+          </fieldset>
+          <p class="hint" id="transport-hint">Direkt vom Laptop zu jedem Tablet.</p>
+          <p class="hint" id="local-launcher" hidden>
+            Für die einfache Einrichtung: <a href="/download">Host-App ansehen</a>.
+            Mit dem Entwickler-Starter auf diesem Laptop kannst du die
+            <a href="http://localhost:3210/host">lokale Host-Seite öffnen</a>.
+            <a href="https://github.com/weiskopfsodefa/sharemyscreen/blob/main/docs/livekit.md" target="_blank" rel="noopener">Einrichtung</a>
+          </p>
           <fieldset class="stream-mode" id="stream-mode" aria-describedby="stream-mode-hint">
             <legend>Priorität</legend>
             <div class="mode-options">
@@ -66,7 +86,20 @@
 
       <section class="card">
         <h2>Tablets <span id="viewer-count"></span></h2>
+        <p class="hint">Im Medienserver-Modus: Empfangswerte der Tablets, etwa alle 3 Sekunden. Ping misst Tablet ↔ Medienserver. Ohne aktuelle Messung erscheint „–“.</p>
+        <div class="viewers-scroll" tabindex="0" role="region" aria-label="Verbindungswerte der Tablets">
         <table class="viewers">
+          <colgroup>
+            <col class="viewer-led" />
+            <col class="viewer-name" />
+            <col class="viewer-status" />
+            <col class="viewer-path" />
+            <col class="viewer-bitrate" />
+            <col class="viewer-fps" />
+            <col class="viewer-resolution" />
+            <col class="viewer-loss" />
+            <col class="viewer-ping" />
+          </colgroup>
           <thead>
             <tr>
               <th></th>
@@ -75,14 +108,16 @@
               <th>Weg</th>
               <th>Bitrate</th>
               <th>fps</th>
+              <th>Auflösung</th>
               <th>Verlust</th>
               <th>Ping</th>
             </tr>
           </thead>
           <tbody id="viewer-rows">
-            <tr class="empty-row"><td colspan="8">Noch keine Tablets verbunden – QR-Code scannen.</td></tr>
+            <tr class="empty-row"><td colspan="9">Noch keine Tablets verbunden – QR-Code scannen.</td></tr>
           </tbody>
         </table>
+        </div>
       </section>
 
       <p class="statusline"><span class="led" id="ws-led"></span><span id="ws-status">Verbinde mit Server…</span></p>

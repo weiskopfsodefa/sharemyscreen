@@ -1,3 +1,4 @@
+import { MediaClient } from './media-client.js';
 import { SignalingClient } from './signaling.js';
 import { createPeerConnection, readConnectionStats, PATH_LABELS } from './webrtc.js';
 
@@ -28,6 +29,9 @@ const state = {
   viewerId: sessionStorage.getItem(VIEWER_ID_KEY) || null,
   deviceModel: null,
   pc: null,
+  transport: { mode: 'direct' },
+  mediaClient: null,
+  mediaPlaying: false,
   // Kandidaten, die eintreffen, bevor setRemoteDescription fertig ist – sonst gehen
   // ausgerechnet die zuerst gesendeten lokalen LAN-Kandidaten verloren.
   pendingCandidates: [],
@@ -62,7 +66,7 @@ const signaling = new SignalingClient({
     if (handler) return handler({ message });
   },
   onStatusChange: ({ status }) => {
-    if (status === 'offline' && !state.pc) {
+    if (status === 'offline' && !state.pc && !state.mediaPlaying) {
       setStatus({ text: 'Server getrennt', sub: 'Verbinde neu…' });
     }
   },
@@ -99,7 +103,7 @@ function joinRoom() {
       name: deviceName(),
       // Läuft die P2P-Verbindung noch (z. B. WS-Reconnect nach Server-Neustart),
       // braucht der Host kein neues Angebot zu schicken – das Bild bliebe sonst kurz schwarz.
-      needsOffer: !state.pc || !['new', 'connecting', 'connected'].includes(state.pc.connectionState),
+      needsOffer: state.transport.mode === 'direct' && (!state.pc || !['new', 'connecting', 'connected'].includes(state.pc.connectionState)),
     },
   });
 }
@@ -116,10 +120,56 @@ ui.renameBtn.addEventListener('click', () => {
   signaling.send({ message: { type: 'viewer:rename', name: deviceName() } });
 });
 
+function setTransport(transport = { mode: 'direct' }) {
+  if (transport.mode === state.transport.mode && transport.session === state.transport.session) return;
+  state.mediaClient?.stop();
+  state.mediaClient = null;
+  state.mediaPlaying = false;
+  teardownPeer();
+  clearTimeout(state.rejoinTimer);
+  state.rejoinTimer = null;
+  state.transport = transport;
+  if (transport.mode === 'livekit') {
+    clearTimeout(state.joinRetryTimer);
+    setStatus({ text: 'Verbinde mit Medienserver…', sub: `Raum ${roomCode}` });
+    state.mediaClient = new MediaClient({
+      credentials: () => signaling.request({ type: 'media:token', session: transport.session }),
+      video: ui.video,
+      onStatus: status => {
+        if (status !== 'connected' && !state.mediaPlaying) {
+          setStatus({ text: 'Verbinde mit Medienserver…', sub: 'Versuche automatisch erneut…' });
+        } else if (status === 'connected' && !state.mediaPlaying) {
+          setStatus({ text: 'Warten auf Übertragung…', sub: `Raum ${roomCode}` });
+        }
+      },
+      onVideo: playing => {
+        state.mediaPlaying = playing;
+        if (playing) {
+          ui.overlay.classList.add('hidden');
+          ui.pathChip.textContent = 'MEDIENSERVER · LAN';
+          playVideo(); requestWakeLock(); showControls();
+        } else setStatus({ text: 'Warten auf Übertragung…', sub: `Raum ${roomCode}` });
+      },
+    });
+    state.mediaClient.start();
+  } else {
+    ui.video.srcObject = null;
+    ui.pathChip.textContent = '';
+    setStatus({ text: 'Warten auf Übertragung…', sub: `Raum ${roomCode}` });
+    joinRoom();
+  }
+}
+
 const MESSAGE_HANDLERS = {
+  'room:transport': ({ message }) => setTransport(message.transport),
   'viewer:joined': ({ message }) => {
     state.viewerId = message.viewerId;
     sessionStorage.setItem(VIEWER_ID_KEY, message.viewerId);
+    setTransport(message.transport);
+    if (state.transport.mode === 'livekit') {
+      clearTimeout(state.joinRetryTimer);
+      return;
+    }
     // Läuft das Video bereits (Rejoin nach Server-Neustart bei intakter P2P-Verbindung),
     // wird ohne Neuverhandlung kein 'connected'-Event mehr feuern – den Overlay, den
     // ein zwischenzeitliches „Raum nicht aktiv“ gezeigt hat, hier explizit verstecken.
@@ -136,6 +186,7 @@ const MESSAGE_HANDLERS = {
     }
   },
   'host:online': () => {
+    if (state.transport.mode === 'livekit') { joinRoom(); return; }
     if (state.pc?.connectionState === 'connected') return;
     setStatus({ text: 'Warten auf Übertragung…', sub: `Raum ${roomCode}` });
     // Erneut beitreten: Der zurückgekehrte Host erfährt so per needsOffer, dass dieses
@@ -143,10 +194,10 @@ const MESSAGE_HANDLERS = {
     joinRoom();
   },
   'host:offline': () => {
-    if (!state.pc) setStatus({ text: 'Host ist offline', sub: 'Warten auf erneute Verbindung…' });
+    if (!state.pc && !state.mediaPlaying) setStatus({ text: 'Host ist offline', sub: 'Warten auf erneute Verbindung…' });
   },
   'room:closed': () => {
-    if (state.pc?.connectionState !== 'connected') {
+    if (state.pc?.connectionState !== 'connected' && !state.mediaPlaying) {
       teardownPeer();
       setStatus({ text: 'Raum gerade nicht aktiv', sub: 'Verbinde automatisch neu, sobald der Host zurück ist…' });
     }
@@ -156,7 +207,7 @@ const MESSAGE_HANDLERS = {
     if (message.code === 'room-not-found') {
       // Passiert auch bei laufendem Video (Server neu gestartet, Host noch nicht
       // zurück) – dann kein Status-Overlay über den funktionierenden Stream legen.
-      if (state.pc?.connectionState !== 'connected') {
+      if (state.pc?.connectionState !== 'connected' && !state.mediaPlaying) {
         setStatus({ text: 'Raum nicht aktiv', sub: `Warte auf Raum „${roomCode}“ – verbinde automatisch…` });
       }
       scheduleJoinRetry();
@@ -166,6 +217,7 @@ const MESSAGE_HANDLERS = {
     }
   },
   signal: async ({ message }) => {
+    if (state.transport.mode !== 'direct') return;
     const { payload } = message;
     if (!payload) return;
     if (payload.sdp?.type === 'offer') {
@@ -435,6 +487,15 @@ document.addEventListener('pointerdown', showControls);
 // --- Verbindungsweg-Anzeige ---
 
 setInterval(async () => {
+  if (state.transport.mode === 'livekit') {
+    const client = state.mediaClient;
+    const session = state.transport.session;
+    let stats;
+    try { stats = await client?.readStats(); } catch { return; }
+    if (client !== state.mediaClient || session !== state.transport.session) return;
+    signaling.send({ message: { type: 'media:stats', session, stats } });
+    return;
+  }
   if (!state.pc || state.pc.connectionState !== 'connected') {
     ui.pathChip.textContent = '';
     return;

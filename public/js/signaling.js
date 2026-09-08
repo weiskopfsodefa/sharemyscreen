@@ -6,6 +6,7 @@ const HEARTBEAT_TIMEOUT_MS = 45_000;
 export class SignalingClient {
   constructor({ onOpen, onMessage, onStatusChange } = {}) {
     Object.assign(this, { onOpen, onMessage, onStatusChange });
+    this.requests = new Map();
     this.retryDelayMs = 1000;
     this.socket = null;
     this.retryTimer = null;
@@ -43,6 +44,15 @@ export class SignalingClient {
       let message;
       try { message = JSON.parse(event.data); } catch { return; }
       if (!message || typeof message.type !== 'string') return;
+      if (message.type === 'reply') {
+        const pending = this.requests.get(message.replyTo);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.requests.delete(message.replyTo);
+          if (message.error) pending.reject(new Error(message.error)); else pending.resolve(message);
+        }
+        return;
+      }
       if (message.type === 'pong') {
         this.lastPong = Date.now();
         return;
@@ -61,6 +71,11 @@ export class SignalingClient {
     clearTimeout(this.connectTimer);
     clearInterval(this.heartbeatTimer);
     socket.close();
+    for (const pending of this.requests.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Server getrennt.'));
+    }
+    this.requests.clear();
     this.onStatusChange?.({ status: 'offline' });
     this.scheduleReconnect();
   }
@@ -72,6 +87,22 @@ export class SignalingClient {
       this.connect();
     }, this.retryDelayMs);
     this.retryDelayMs = Math.min(this.retryDelayMs * 2, MAX_RETRY_DELAY_MS);
+  }
+
+  request(message) {
+    const requestId = String(this.nextRequestId = (this.nextRequestId || 0) + 1);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.requests.delete(requestId);
+        reject(new Error('Server antwortet nicht.'));
+      }, 10_000);
+      this.requests.set(requestId, { resolve, reject, timer });
+      if (!this.send({ message: { ...message, requestId } })) {
+        clearTimeout(timer);
+        this.requests.delete(requestId);
+        reject(new Error('Server nicht verbunden.'));
+      }
+    });
   }
 
   send({ message }) {
