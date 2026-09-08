@@ -4,3 +4,8 @@ scripts
 README.md
 
 .local
+
+.cache
+desktop-resources
+dist-desktop
+desktop

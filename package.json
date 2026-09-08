@@ -9,7 +9,10 @@
     "smoke-test": "node scripts/smoke-test.js",
     "test": "node --test tests/*.test.js",
     "start:local": "node scripts/local-server.js",
-    "check:local": "node scripts/check-local.js"
+    "check:local": "node scripts/check-local.js",
+    "desktop:prepare": "node scripts/prepare-desktop.js",
+    "desktop:dev": "electron .",
+    "desktop:build": "electron-builder --config electron-builder.cjs --publish never"
   },
   "engines": {
     "node": ">=20"
@@ -19,5 +22,10 @@
     "livekit-server-sdk": "^2.18.0",
     "qrcode": "^1.5.4",
     "ws": "^8.18.0"
-  }
+  },
+  "devDependencies": {
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3"
+  },
+  "main": "desktop/main.mjs"
 }

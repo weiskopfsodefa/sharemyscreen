@@ -1,0 +1,7 @@
+.setup { max-width: 680px; margin: 3rem auto; }
+.setup h1 { font-size: clamp(2rem, 5vw, 3.2rem); line-height: 1.08; margin: 0 0 1.5rem; }
+.setup h1 em { color: var(--amber); font-style: normal; }
+.setup p { margin-block: 1.2rem; }
+.setup .mode-option { flex-basis: 100%; }
+.setup .actions { justify-content: flex-start; }
+#status { min-height: 3em; }

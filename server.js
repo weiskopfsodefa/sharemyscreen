@@ -215,7 +215,7 @@ async function handleTransport({ socket, message }) {
   const reply = (data) => send({ socket, message: { type: 'reply', replyTo: message.requestId, ...data } });
   if (!room || meta.role !== 'host' || room.hostSocket !== socket) return reply({ error: 'Nur der Host kann den Übertragungsweg ändern.' });
   if (!['direct', 'livekit'].includes(message.mode)) return reply({ error: 'Ungültiger Übertragungsweg.' });
-  if (message.mode === 'livekit' && !MEDIA) return reply({ error: 'Bitte den lokalen Starter öffnen.' });
+  if (message.mode === 'livekit' && !MEDIA) return reply({ error: 'Bitte die Host-App oder den lokalen Starter öffnen.' });
   // Host darf nach Signaling-Neustart seine bestehende Mediensitzung wiederherstellen.
   const session = /^[a-f0-9-]{36}$/.test(message.session || '') ? message.session : crypto.randomUUID();
   room.transport = message.mode === 'livekit' ? { mode: 'livekit', session } : { mode: 'direct' };
@@ -265,6 +265,7 @@ const MESSAGE_HANDLERS = {
 const ROUTE_FILES = {
   '/': 'index.html',
   '/host': 'room.html',
+  '/download': 'download.html',
 };
 
 function resolveStaticFile({ urlPath }) {
@@ -348,7 +349,7 @@ const handleHttp = (req, res) => {
     res.end(data);
   });
 };
-const server = TLS ? https.createServer(TLS, handleHttp) : http.createServer(handleHttp);
+export const server = TLS ? https.createServer(TLS, handleHttp) : http.createServer(handleHttp);
 
 // --- WebSocket-Signaling ---
 

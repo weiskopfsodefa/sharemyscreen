@@ -1,0 +1,53 @@
+name: Host-App installers
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'scripts/**'
+      - 'public/**'
+      - 'server.js'
+      - 'media-config.js'
+      - 'package*.json'
+      - 'electron-builder.cjs'
+      - '.github/workflows/desktop.yml'
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+          - os: macos-15-intel
+            arch: x64
+          - os: windows-latest
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - run: npm ci
+      - run: npm test
+      - run: npm run desktop:prepare
+        env:
+          DESKTOP_ARCH: ${{ matrix.arch }}
+      - run: npm run desktop:build -- --${{ matrix.arch }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-app-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            dist-desktop/*.dmg
+            dist-desktop/*.exe
+          if-no-files-found: error

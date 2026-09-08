@@ -44,9 +44,8 @@ brew install livekit
 
 Fehlt Homebrew, folge zuerst der Anleitung auf [brew.sh](https://brew.sh/),
 inklusive der dort ausgegebenen Schritte zum Einrichten des PATH. Öffne danach
-ein neues Terminal. Alternativ gibt es Server-Binärdateien in den offiziellen
-LiveKit-Releases: `darwin` steht für macOS, `arm64` für Apple Silicon und
-`amd64` für Intel.
+ein neues Terminal. Für macOS verwenden wir Homebrew; die offiziellen
+LiveKit-Releases enthalten nicht für jede Version fertige macOS-Binärdateien.
 
 Bei einem eigenen Installationsort kannst du den Pfad ausdrücklich setzen:
 

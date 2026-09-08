@@ -61,6 +61,7 @@ function setup(file) {
     send({ message }) { if (!this.online) return false; this.sent.push(message); return true; }
   }
   const context = vm.createContext({
+    URLSearchParams,
     document: { getElementById: element, querySelectorAll: () => [], createElement: () => ({}), addEventListener() {} },
     location: { pathname: '/ABC123', protocol: 'http:', host: 'localhost' },
     localStorage: { getItem: () => null, setItem() {} }, sessionStorage: { getItem: () => null, setItem() {} },

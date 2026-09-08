@@ -1,20 +1,16 @@
-import os from 'node:os';
+import { localAddresses, prepareLocalConfig } from './local-config.js';
 import { checkLiveKit, printLiveKitCheck } from './livekit-check.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { isPrivateIPv4 } from '../media-config.js';
 
 const installation = checkLiveKit();
 printLiveKitCheck(installation);
 if (!installation.ok) process.exit(1);
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const addresses = [...new Set(Object.values(os.networkInterfaces()).flat()
-  .filter(entry => entry.family === 'IPv4' && !entry.internal && isPrivateIPv4(entry.address))
-  .map(entry => entry.address))];
+const addresses = [...new Set(localAddresses().map(entry => entry.address))];
 const ip = process.env.LOCAL_MEDIA_IP || (addresses.length === 1 ? addresses[0] : null);
 if (!ip || !addresses.includes(ip)) {
   console.error('Bitte die LAN-Adresse des Host-Laptops mit LOCAL_MEDIA_IP angeben.');
@@ -22,26 +18,7 @@ if (!ip || !addresses.includes(ip)) {
   process.exit(1);
 }
 const dir = path.join(root, '.local');
-fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-const secretFile = path.join(dir, 'secrets.json');
-let secrets;
-try { secrets = JSON.parse(fs.readFileSync(secretFile, 'utf8')); }
-catch (error) {
-  if (error.code !== 'ENOENT') throw error;
-  secrets = { key: `sms${crypto.randomBytes(8).toString('hex')}`, secret: crypto.randomBytes(32).toString('hex'), host: crypto.randomBytes(32).toString('hex') };
-  fs.writeFileSync(secretFile, JSON.stringify(secrets), { mode: 0o600 });
-}
-const configPath = path.join(dir, 'livekit.yaml');
-// No external IP discovery, TURN or cloud service. RTC clients also disable STUN.
-const config = {
-  port: 7880, bind_addresses: ['127.0.0.1', ip],
-  rtc: { node_ip: ip, use_external_ip: false, tcp_port: 7881, udp_port: 7882, stun_servers: [] },
-  keys: { [secrets.key]: secrets.secret },
-  room: { empty_timeout: 60, departure_timeout: 10, max_participants: 21 },
-  turn: { enabled: false },
-};
-// JSON is a YAML subset and avoids platform-dependent quoting of secrets/paths.
-fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+const { configPath, secrets } = prepareLocalConfig({ dir, ip });
 let app;
 let stopping = false;
 const livekit = spawn(installation.binary, ['--config', configPath], { stdio: ['ignore', 'pipe', 'pipe'] });

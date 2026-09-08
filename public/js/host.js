@@ -153,7 +153,8 @@ const MESSAGE_HANDLERS = {
     localStorage.setItem(LAST_ROOM_KEY, message.code);
     // Raumcode im Pfad behalten; lokal verwendet der QR-Code die LAN-Adresse.
     if (location.pathname !== `/${message.code}`) {
-      history.replaceState(null, '', `/${message.code}`);
+      const desktop = new URLSearchParams(location.search).get('desktop') === '1' ? '?desktop=1' : '';
+      history.replaceState(null, '', `/${message.code}${desktop}`);
     }
     renderRoom();
   },
@@ -204,7 +205,7 @@ function renderTransport() {
   ui.localLauncher.hidden = !media || Boolean(state.media?.available);
   ui.shareBtn.disabled = state.starting || !state.code || (media && !state.media?.available);
   ui.transportHint.textContent = media
-    ? state.media?.available ? 'Ein gemeinsamer Stream über LiveKit im LAN. Qualität gilt für alle Tablets.' : 'Der Medienserver benötigt den lokalen Starter auf diesem Laptop.'
+    ? state.media?.available ? 'Ein gemeinsamer Stream über LiveKit im LAN. Qualität gilt für alle Tablets.' : 'Für den Medienserver die Host-App auf diesem Laptop öffnen.'
     : 'Direkt vom Laptop zu jedem Tablet.';
 }
 ui.transportMode.addEventListener('change', () => { renderTransport(); renderQualityHint(); });
@@ -265,7 +266,7 @@ async function startShare() {
           ui.onairText.textContent = status === 'connected' ? 'ON AIR' : 'Verbinde…';
           ui.transportHint.textContent = status === 'connected'
             ? 'LiveKit verbunden · ein gemeinsamer Stream im LAN. Geräte-Status zeigt die Verbindung zum Medienserver.'
-            : 'Medienserver nicht verbunden – versuche automatisch erneut. Lokalen Starter prüfen.';
+            : 'Medienserver nicht verbunden – versuche automatisch erneut.';
         },
         onParticipants: participants => {
           state.mediaParticipants = new Set(participants.map(p => p.identity));
@@ -738,6 +739,10 @@ function renderViewers() {
     .join('');
 }
 
+// The installed Host-App starts in its bundled local-media mode.
+if (new URLSearchParams(location.search).get('desktop') === '1') {
+  for (const input of ui.transportInputs) input.checked = input.value === 'livekit';
+}
 initStreamMode();
 initQualitySelect();
 signaling.connect();
