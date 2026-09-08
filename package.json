@@ -8,7 +8,8 @@
     "start": "node server.js",
     "smoke-test": "node scripts/smoke-test.js",
     "test": "node --test tests/*.test.js",
-    "start:local": "node scripts/local-server.js"
+    "start:local": "node scripts/local-server.js",
+    "check:local": "node scripts/check-local.js"
   },
   "engines": {
     "node": ">=20"

@@ -116,6 +116,19 @@ Medienserver-Modus auf die lokale Host-Seite. Es wird keine unsichere Verbindung
 von einer öffentlichen HTTPS-Seite zu einem lokalen HTTP-Dienst vorausgesetzt.
 Die lokalen Räume und ihre QR-Codes sind unabhängig von den gehosteten Räumen.
 
+Die ausführliche [Installationsanleitung für macOS und Windows](docs/livekit.md)
+erklärt Prüfung, Installation und den ersten Start. Eine vorhandene Installation
+kann weiterverwendet werden. Vorab im Projektordner prüfen:
+
+```bash
+npm run check:local
+```
+
+Der Check meldet die ausführbare LiveKit-Version, startet keinen Server und
+installiert nichts. Der lokale Starter führt dieselbe Prüfung automatisch aus,
+bevor er Konfiguration und Schlüssel anlegt. Auf macOS werden zusätzlich die
+üblichen Homebrew-Pfade durchsucht. `LIVEKIT_BIN` hat immer Vorrang.
+
 ### Einmalige Einrichtung auf dem Host
 
 Benötigt werden Node.js ab Version 20, dieses Repository (`npm ci`) und

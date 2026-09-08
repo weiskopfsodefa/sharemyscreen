@@ -1,10 +1,15 @@
 import os from 'node:os';
+import { checkLiveKit, printLiveKitCheck } from './livekit-check.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isPrivateIPv4 } from '../media-config.js';
+
+const installation = checkLiveKit();
+printLiveKitCheck(installation);
+if (!installation.ok) process.exit(1);
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const addresses = [...new Set(Object.values(os.networkInterfaces()).flat()
@@ -39,7 +44,7 @@ const config = {
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
 let app;
 let stopping = false;
-const livekit = spawn(process.env.LIVEKIT_BIN || 'livekit-server', ['--config', configPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+const livekit = spawn(installation.binary, ['--config', configPath], { stdio: ['ignore', 'pipe', 'pipe'] });
 function stop(code = 0) {
   if (stopping) return;
   stopping = true;
