@@ -58,11 +58,15 @@ export async function readConnectionStats({ pc }) {
     if (entry.type === 'outbound-rtp') {
       stats.bytesSent = entry.bytesSent ?? null;
       stats.framesPerSecond = entry.framesPerSecond ?? stats.framesPerSecond;
+      stats.frameWidth = entry.frameWidth ?? stats.frameWidth;
+      stats.frameHeight = entry.frameHeight ?? stats.frameHeight;
       stats.qualityLimitationReason = entry.qualityLimitationReason ?? null;
     }
     if (entry.type === 'inbound-rtp') {
       stats.bytesReceived = entry.bytesReceived ?? null;
       stats.framesPerSecond = entry.framesPerSecond ?? stats.framesPerSecond;
+      stats.frameWidth = entry.frameWidth ?? stats.frameWidth;
+      stats.frameHeight = entry.frameHeight ?? stats.frameHeight;
     }
     if (entry.type === 'remote-inbound-rtp') {
       stats.fractionLost = entry.fractionLost ?? null;

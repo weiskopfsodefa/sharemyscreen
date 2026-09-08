@@ -1,3 +1,5 @@
+import { receiverStats } from './media-stats.js';
+
 // Only loaded for the optional SFU mode; the direct transport stays independent.
 export class MediaClient {
   constructor({ credentials, video, track, publishOptions, onStatus = () => {}, onVideo = () => {}, onParticipants = () => {}, loadSDK = () => import('/vendor/livekit.mjs') }) {
@@ -59,6 +61,18 @@ export class MediaClient {
     }
   }
 
+  async readStats() {
+    const track = this.remoteTrack;
+    const generation = this.generation;
+    if (!this.active || !track) return null;
+    const report = await track.getRTCStatsReport();
+    if (!this.active || generation !== this.generation || track !== this.remoteTrack) return null;
+    const sample = receiverStats(report, this.statsTrack === track ? this.statsSample : null);
+    this.statsTrack = track;
+    this.statsSample = sample;
+    return sample?.stats ?? null;
+  }
+
   retry(generation) {
     if (!this.active || this.generation !== generation) return;
     ++this.generation;
@@ -80,6 +94,8 @@ export class MediaClient {
     clearTimeout(this.timer);
     this.remoteTrack?.detach(this.video);
     this.remoteTrack = null;
+    this.statsSample = null;
+    this.statsTrack = null;
     const room = this.room;
     this.room = null;
     room?.disconnect(false);

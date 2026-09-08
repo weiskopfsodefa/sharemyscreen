@@ -133,6 +133,13 @@ function readSavedRoom() {
 }
 
 const MESSAGE_HANDLERS = {
+  'media:stats': ({ message }) => {
+    const viewer = state.viewers.get(message.viewerId);
+    if (!viewer || !state.mediaClient || message.session !== state.mediaSession) return;
+    viewer.stats = message.stats;
+    viewer.statsReceivedAt = Date.now();
+    renderViewers();
+  },
   'host:created': ({ message }) => {
     state.code = message.code;
     state.hostToken = message.hostToken;
@@ -660,13 +667,15 @@ function renderViewers() {
 
   if (!state.viewers.size) {
     ui.viewerRows.innerHTML =
-      '<tr class="empty-row"><td colspan="8">Noch keine Tablets verbunden – QR-Code scannen.</td></tr>';
+      '<tr class="empty-row"><td colspan="9">Noch keine Tablets verbunden – QR-Code scannen.</td></tr>';
     return;
   }
 
   ui.viewerRows.innerHTML = [...state.viewers.values()]
     .map((viewer) => {
-      const stats = viewer.stats;
+      const media = Boolean(state.mediaClient);
+      const stats = media && (viewer.status !== 'verbunden' || Date.now() - (viewer.statsReceivedAt || 0) > 10_000)
+        ? null : viewer.stats;
       const path = stats?.path ? PATH_LABELS[stats.path] : null;
       const ledClass = viewer.status === 'verbunden' ? 'ok' : viewer.status === 'wartet' ? '' : 'warn';
       const autoStep = currentPreset().auto && viewer.pc ? currentStreamMode().ladder[viewer.autoState.step].label : null;
@@ -674,9 +683,10 @@ function renderViewers() {
         <td><span class="led ${ledClass}"></span></td>
         <td class="name">${escapeHtml({ text: viewerDisplayName({ viewer }) })}</td>
         <td>${viewer.status}${autoStep ? ` · ${autoStep}` : ''}</td>
-        <td>${path ? `<span class="chip ${path.css}" title="${path.hint}">${path.text}</span>` : '–'}</td>
+        <td>${media ? '<span class="chip ok">MEDIENSERVER</span>' : path ? `<span class="chip ${path.css}" title="${path.hint}">${path.text}</span>` : '–'}</td>
         <td>${formatBitrate({ bits: stats?.bitrate ?? null })}</td>
-        <td>${stats?.framesPerSecond ?? '–'}</td>
+        <td>${stats?.framesPerSecond != null ? Math.round(stats.framesPerSecond) : '–'}</td>
+        <td>${stats?.frameWidth && stats?.frameHeight ? `${stats.frameWidth} × ${stats.frameHeight}` : '–'}</td>
         <td>${stats?.fractionLost != null ? `${(stats.fractionLost * 100).toFixed(1)} %` : '–'}</td>
         <td>${stats?.roundTripTime != null ? `${Math.round(stats.roundTripTime * 1000)} ms` : '–'}</td>
       </tr>`;

@@ -487,7 +487,15 @@ document.addEventListener('pointerdown', showControls);
 // --- Verbindungsweg-Anzeige ---
 
 setInterval(async () => {
-  if (state.transport.mode === 'livekit') return;
+  if (state.transport.mode === 'livekit') {
+    const client = state.mediaClient;
+    const session = state.transport.session;
+    let stats;
+    try { stats = await client?.readStats(); } catch { return; }
+    if (client !== state.mediaClient || session !== state.transport.session) return;
+    signaling.send({ message: { type: 'media:stats', session, stats } });
+    return;
+  }
   if (!state.pc || state.pc.connectionState !== 'connected') {
     ui.pathChip.textContent = '';
     return;

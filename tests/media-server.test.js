@@ -55,6 +55,17 @@ test('Optional media signaling grants only the host publishing rights, isolates 
   host.send({ type: 'host:transport', mode: 'livekit', requestId: 'mode' });
   const { transport } = await host.wait('reply');
   assert.equal((await viewer.wait('room:transport')).transport.session, transport.session);
+  // Wrong-session and host-origin telemetry must not reach the host.
+  viewer.send({ type: 'media:stats', session: 'old-session', stats: { framesPerSecond: 999 } });
+  host.send({ type: 'media:stats', session: transport.session, stats: { framesPerSecond: 888 } });
+  viewer.send({ type: 'media:stats', viewerId: 'spoofed', session: transport.session,
+    stats: { framesPerSecond: 30, bitrate: 2000000, frameWidth: '<img>', arbitrary: 'ignored' } });
+  const measurement = await host.wait('media:stats');
+  assert.equal(measurement.viewerId, joined.viewerId);
+  assert.equal(measurement.stats.framesPerSecond, 30);
+  assert.equal(measurement.stats.bitrate, 2000000);
+  assert.equal(measurement.stats.frameWidth, null);
+  assert.equal(measurement.stats.arbitrary, undefined);
   host.send({ type: 'media:token', session: transport.session, requestId: 'host-token' });
   viewer.send({ type: 'media:token', session: transport.session, role: 'host', requestId: 'viewer-token' });
   const verifier = new TokenVerifier('testkey', secret);

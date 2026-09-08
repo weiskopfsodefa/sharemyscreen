@@ -1,3 +1,4 @@
+import { sanitizeMediaStats } from './public/js/media-stats.js';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -236,7 +237,19 @@ async function handleMediaToken({ socket, message }) {
   reply({ token, url: TLS ? `wss://${MEDIA.ip}:${PORT}/livekit` : `ws://${MEDIA.ip}:7880` });
 }
 
+function handleMediaStats({ socket, message }) {
+  const meta = socket.meta;
+  const room = rooms.get(meta?.code);
+  if (meta?.role !== 'viewer' || room?.viewers.get(meta.viewerId) !== socket
+    || room.transport?.mode !== 'livekit' || message.session !== room.transport.session) return;
+  send({ socket: room.hostSocket, message: {
+    type: 'media:stats', viewerId: meta.viewerId, session: room.transport.session,
+    stats: sanitizeMediaStats(message.stats),
+  } });
+}
+
 const MESSAGE_HANDLERS = {
+  'media:stats': handleMediaStats,
   'host:transport': handleTransport,
   'media:token': handleMediaToken,
   ping: ({ socket }) => send({ socket, message: { type: 'pong' } }),

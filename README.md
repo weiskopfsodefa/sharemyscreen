@@ -196,8 +196,10 @@ nötig. Im Direktmodus bleibt die bisherige STUN-Konfiguration bestehen.
 - Zehn Tablets erhalten weiterhin zehn Kopien über das WLAN; reduziert wird die
   Anzahl der vom Host-Browser erzeugten Streams. Ein langsamer Empfänger bekommt
   noch keine eigene Auflösungsvariante.
-- Die Geräteliste zeigt die LiveKit-Verbindung; die bisherigen P2P-Messspalten
-  bleiben im SFU-Modus leer. Das ist keine Bestätigung störungsfreien Decodierens.
+- Die Geräteliste zeigt pro Tablet empfangene Bitrate, decodierte fps, Auflösung
+  und Paketverlust (Intervallmessung etwa alle 3 Sekunden). Ping bezieht sich auf
+  Tablet ↔ Medienserver, nicht auf die Ende-zu-Ende-Videoverzögerung. Nach 10 Sekunden
+  ohne neue Messung werden Werte ausgeblendet; nicht verfügbare Browserwerte bleiben leer.
 - LiveKit übernimmt Wiederverbindungen. Nach endgültigem Abbruch holt die App
   neue kurzlebige Tokens und versucht erneut. Ein LiveKit-Neustart wird so ebenfalls
   abgefangen, solange die Bildschirmfreigabe im Host-Browser noch aktiv ist.
