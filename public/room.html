@@ -34,13 +34,19 @@
 
         <section class="card">
           <h2>Übertragung</h2>
-          <label class="select-row transport-row">
-            Übertragungsweg
-            <select id="transport-select">
-              <option value="direct">Direkt</option>
-              <option value="livekit">Lokaler Medienserver</option>
-            </select>
-          </label>
+          <fieldset class="stream-mode" id="transport-mode" aria-describedby="transport-hint">
+            <legend>Übertragungsweg</legend>
+            <div class="mode-options">
+              <label class="mode-option">
+                <input type="radio" name="transport-mode" value="direct" checked />
+                <span><strong>Direkt</strong><small>Vom Laptop zu jedem Tablet</small></span>
+              </label>
+              <label class="mode-option">
+                <input type="radio" name="transport-mode" value="livekit" />
+                <span><strong>Lokaler Medienserver</strong><small>Ein Stream · Verteilung im WLAN</small></span>
+              </label>
+            </div>
+          </fieldset>
           <p class="hint" id="transport-hint">Direkt vom Laptop zu jedem Tablet.</p>
           <p class="hint" id="local-launcher" hidden>
             Bitte den lokalen Starter auf diesem Laptop ausführen, dann

@@ -69,7 +69,8 @@ const ui = {
   copyLink: document.getElementById('copy-link'),
   shareBtn: document.getElementById('share-btn'),
   stopBtn: document.getElementById('stop-btn'),
-  transportSelect: document.getElementById('transport-select'),
+  transportMode: document.getElementById('transport-mode'),
+  transportInputs: [...document.querySelectorAll('input[name="transport-mode"]')],
   transportHint: document.getElementById('transport-hint'),
   localLauncher: document.getElementById('local-launcher'),
   streamMode: document.getElementById('stream-mode'),
@@ -191,15 +192,19 @@ ui.copyLink.addEventListener('click', async () => {
   setTimeout(() => (ui.copyLink.textContent = 'Link kopieren'), 1500);
 });
 
+function selectedTransport() {
+  return ui.transportInputs.find(input => input.checked)?.value ?? 'direct';
+}
+
 function renderTransport() {
-  const media = ui.transportSelect.value === 'livekit';
+  const media = selectedTransport() === 'livekit';
   ui.localLauncher.hidden = !media || Boolean(state.media?.available);
   ui.shareBtn.disabled = state.starting || !state.code || (media && !state.media?.available);
   ui.transportHint.textContent = media
     ? state.media?.available ? 'Ein gemeinsamer Stream über LiveKit im LAN. Qualität gilt für alle Tablets.' : 'Der Medienserver benötigt den lokalen Starter auf diesem Laptop.'
     : 'Direkt vom Laptop zu jedem Tablet.';
 }
-ui.transportSelect.addEventListener('change', () => { renderTransport(); renderQualityHint(); });
+ui.transportMode.addEventListener('change', () => { renderTransport(); renderQualityHint(); });
 
 // --- Bildschirm teilen ---
 
@@ -208,13 +213,13 @@ ui.stopBtn.addEventListener('click', stopShare);
 
 async function startShare() {
   if (state.starting || state.stream) return;
-  const useMedia = ui.transportSelect.value === 'livekit';
+  const useMedia = selectedTransport() === 'livekit';
   if (useMedia && !state.media?.available) return;
   const generation = ++state.startGeneration;
   state.starting = true;
   ui.shareBtn.disabled = true;
   ui.streamMode.disabled = true;
-  ui.transportSelect.disabled = true;
+  ui.transportMode.disabled = true;
   ui.qualitySelect.disabled = useMedia;
   let stream;
   try {
@@ -278,7 +283,7 @@ async function startShare() {
       state.starting = false;
       ui.shareBtn.disabled = false;
       ui.streamMode.disabled = Boolean(state.stream);
-      ui.transportSelect.disabled = Boolean(state.stream);
+      ui.transportMode.disabled = Boolean(state.stream);
       ui.qualitySelect.disabled = useMedia && Boolean(state.stream);
     }
   }
@@ -287,13 +292,13 @@ async function startShare() {
 function stopShare() {
   ++state.startGeneration;
   state.starting = false;
-  const hadMedia = state.mediaSession || ui.transportSelect.value === 'livekit';
+  const hadMedia = state.mediaSession || selectedTransport() === 'livekit';
   state.mediaClient?.stop();
   state.mediaClient = null;
   state.mediaSession = null;
   state.mediaParticipants.clear();
   if (hadMedia) signaling.request({ type: 'host:transport', mode: 'direct' }).catch(() => {});
-  ui.transportSelect.disabled = false;
+  ui.transportMode.disabled = false;
   ui.qualitySelect.disabled = false;
   ui.shareBtn.disabled = false;
   state.stream?.getTracks().forEach((track) => track.stop());
@@ -385,7 +390,7 @@ function retryViewer({ viewerId, viewer, pc }) {
 
 async function connectViewer({ viewerId }) {
   const viewer = state.viewers.get(viewerId);
-  if (!viewer || !state.stream || !viewer.signalingOnline || ui.transportSelect.value === 'livekit') return;
+  if (!viewer || !state.stream || !viewer.signalingOnline || selectedTransport() === 'livekit') return;
   clearTimeout(viewer.retryTimer);
   clearTimeout(viewer.connectTimer);
   clearTimeout(viewer.disconnectTimer);
@@ -562,7 +567,7 @@ function applyQualityToAll() {
 
 function renderQualityHint() {
   const preset = currentPreset();
-  if (ui.transportSelect.value === 'livekit') {
+  if (selectedTransport() === 'livekit') {
     ui.qualityHint.textContent = 'Gemeinsame Qualität für alle Tablets. Automatisch startet mit bis zu 720p / 30 fps; der Browser passt gemäß Priorität an. Zum Ändern die Übertragung beenden.';
     return;
   }
