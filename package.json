@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "private": true,
   "type": "module",
-  "description": "Bildschirm live an Tablets im lokalen Netz streamen – WebRTC P2P-Fanout mit gehostetem Signaling.",
+  "description": "Bildschirm live an Tablets im lokalen Netz streamen \u2013 WebRTC P2P-Fanout mit gehostetem Signaling.",
   "scripts": {
     "start": "node server.js",
     "smoke-test": "node scripts/smoke-test.js",
@@ -27,5 +27,6 @@
     "electron": "44.2.0",
     "electron-builder": "26.15.3"
   },
-  "main": "desktop/main.mjs"
+  "main": "desktop/main.mjs",
+  "license": "MIT"
 }

@@ -1,5 +1,5 @@
 {
-  "mac-arm64": "https://github.com/weiskopfsodefa/sharemyscreen-downloads/releases/download/v0.1.1/sharemyscreen-Host-0.1.1-mac-arm64.dmg",
-  "mac-x64": "https://github.com/weiskopfsodefa/sharemyscreen-downloads/releases/download/v0.1.1/sharemyscreen-Host-0.1.1-mac-x64.dmg",
-  "windows-x64": "https://github.com/weiskopfsodefa/sharemyscreen-downloads/releases/download/v0.1.1/sharemyscreen-Host-0.1.1-win-x64.exe"
+  "mac-arm64": "https://github.com/weiskopfsodefa/sharemyscreen/releases/download/v0.1.1/sharemyscreen-Host-0.1.1-mac-arm64.dmg",
+  "mac-x64": "https://github.com/weiskopfsodefa/sharemyscreen/releases/download/v0.1.1/sharemyscreen-Host-0.1.1-mac-x64.dmg",
+  "windows-x64": "https://github.com/weiskopfsodefa/sharemyscreen/releases/download/v0.1.1/sharemyscreen-Host-0.1.1-win-x64.exe"
 }

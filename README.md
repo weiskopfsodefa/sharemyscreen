@@ -110,8 +110,8 @@ neu laden, damit alle dieselbe Signaling-Version verwenden.
 
 Die [Host-App](docs/host-app.md) bündelt Oberfläche, Laufzeit und LiveKit. Nutzer
 brauchen nach Installation kein Node.js, Go, Terminal oder separates LiveKit.
-Die Installer liegen im öffentlichen [Download-Repository](https://github.com/weiskopfsodefa/sharemyscreen-downloads/releases).
-Der Projekt-Quellcode bleibt privat. `public/downloads.json` enthält die öffentlichen
+Quellcode und [Installer-Releases](https://github.com/weiskopfsodefa/sharemyscreen/releases)
+liegen im öffentlichen Projekt-Repository. `public/downloads.json` enthält die öffentlichen
 Asset-URLs. Die Installer werden unsigniert angeboten; Plattformabnahmen für
 Windows und Intel-Macs stehen noch aus.
 
@@ -262,3 +262,8 @@ Der Test-Proxy bindet ausschließlich an Loopback und gehört nicht zum Deployme
 Vor dem Einsatz: mit 1, 3, 5 und 10 echten Tablets testen, Wiedergabeflüssigkeit,
 Verzögerung und Host-Auslastung messen, WLAN aus-/einschalten und Starter neu starten.
 Browserfenster auf einem einzigen Rechner ersetzen keinen WLAN-Lasttest.
+
+## Lizenz
+
+Der Projektcode steht unter der [MIT-Lizenz](LICENSE). Eingebundene Abhängigkeiten
+und LiveKit behalten ihre jeweiligen Lizenzen und Lizenzhinweise.

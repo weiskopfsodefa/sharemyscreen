@@ -5,7 +5,7 @@ module.exports = {
   productName: 'sharemyscreen Host',
   directories: { output: 'dist-desktop' },
   artifactName: 'sharemyscreen-Host-${version}-${os}-${arch}.${ext}',
-  files: ['desktop/**/*', 'public/**/*', 'scripts/local-config.js', 'scripts/livekit-check.js', 'server.js', 'media-config.js', 'package.json'],
+  files: ['desktop/**/*', 'public/**/*', 'scripts/local-config.js', 'scripts/livekit-check.js', 'server.js', 'media-config.js', 'package.json', 'LICENSE'],
   extraResources: [{ from: 'desktop-resources/livekit', to: 'livekit' }],
   asar: true,
   beforePack: async context => {

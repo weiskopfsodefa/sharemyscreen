@@ -38,14 +38,12 @@ beim Öffnen Sicherheitsmeldungen anzeigen. Signierung und Notarisierung sind
 später möglich; Laufzeittests auf Windows und Intel-Macs stehen noch aus.
 
 Für eine Veröffentlichung: Version erhöhen, die drei Installer in CI bauen und
-als Release im öffentlichen Repository `weiskopfsodefa/sharemyscreen-downloads`
-hochladen. Dort liegen nur Downloads und Release-Hinweise, kein Projekt-Quellcode.
-Das eigentliche Projekt-Repository bleibt privat; dessen Release-Assets sind
-für nicht angemeldete Besucher nicht zugänglich.
+als Release im öffentlichen Projekt-Repository `weiskopfsodefa/sharemyscreen`
+hochladen. Quellcode und Installer sind dort ohne GitHub-Anmeldung zugänglich.
 
 Nach erfolgreichem Upload das Release veröffentlichen, die Asset-URLs in
 `public/downloads.json` aktualisieren und ohne GitHub-Anmeldung prüfen.
-`public/js/download.js` akzeptiert nur Release-URLs aus dem Download-Repository.
+`public/js/download.js` akzeptiert nur Release-URLs aus dem Projekt-Repository.
 Anschließend die Webseite deployen und alle drei Download-Buttons kontrollieren.
 
 ## Lokal entwickeln und bauen
