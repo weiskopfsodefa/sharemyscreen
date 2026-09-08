@@ -189,8 +189,16 @@ nötig. Im Direktmodus bleibt die bisherige STUN-Konfiguration bestehen.
 ### Qualität und Grenzen dieser ersten SFU-Version
 
 - Ein VP8-Videostream ohne Simulcast/zusätzlichen Backup-Codec für alle Tablets.
-  „Automatisch“ startet mit bis zu **720p / 30 fps / 2 Mbit/s**. Der Browser passt
-  entsprechend der Priorität an; die eigene P2P-Stufenautomatik ist hier inaktiv.
+  „Automatisch“ startet mit bis zu **720p / 30 fps / 2 Mbit/s** und steigt nach
+  jeweils 30 Sekunden stabiler Messwerte bis zur **nativen Quellauflösung / 30 fps**
+  (maximal 6 Mbit/s). Die Quelle bleibt nativ, nur der Encoder skaliert herunter.
+  Bei anhaltender CPU-/Bandbreitenbegrenzung, Paketverlust über 3 % oder deutlich
+  weniger decodierten als gesendeten Frames senkt die Automatik die gemeinsame Stufe.
+  Bewegung priorisiert FPS, Bildschärfe priorisiert Auflösung. Fehlende Messwerte
+  verhindern Aufstiege; nach gescheiterten Aufstiegen wächst die Wartezeit bis 5 Minuten.
+  Ein schwaches Tablet kann damit die Qualität aller Empfänger senken. Zielstufe und
+  tatsächlich empfangene Auflösung werden getrennt angezeigt. Nativ meint die vom
+  Browser gelieferte Quellauflösung, nicht eine künstliche Vergrößerung.
 - Feste Presets gelten gemeinsam für alle Empfänger. Qualität und Übertragungsweg
   sind während des Streams gesperrt. Zum Wechseln stoppen und neu starten.
 - Zehn Tablets erhalten weiterhin zehn Kopien über das WLAN; reduziert wird die

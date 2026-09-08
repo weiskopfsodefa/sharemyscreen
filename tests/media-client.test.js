@@ -57,3 +57,41 @@ test('Viewer attaches only the host video and never publishes', async () => {
   assert.equal(room.publication, undefined);
   s.client.stop();
 });
+
+test('Quality changes scale the native source and preserve sender parameters and reconnect budget', async () => {
+  let params = { transactionId: 'keep', encodings: [{ rid: 'video', active: true }] };
+  const sender = { getParameters: () => structuredClone(params), setParameters: async next => { params = next; } };
+  const capture = { getSettings: () => ({ height: 1440 }) };
+  const s = setup({ track: capture, publishOptions: {} });
+  s.client.start(); await flush();
+  s.client.localTrack = { sender };
+  assert.equal(await s.client.setQuality({ height: 720, maxFramerate: 30, maxBitrate: 2000000 }), true);
+  assert.equal(params.encodings[0].scaleResolutionDownBy, 2);
+  assert.equal(params.encodings[0].rid, 'video');
+  assert.equal(params.transactionId, 'keep');
+  assert.equal(await s.client.setQuality({ height: null, maxFramerate: 30, maxBitrate: 6000000 }), true);
+  assert.equal(params.encodings[0].scaleResolutionDownBy, 1);
+  assert.equal(s.client.publishOptions.screenShareEncoding.maxBitrate, 6000000);
+  params.encodings[0].scaleResolutionDownBy = 99;
+  s.rooms[0].emit('Reconnected'); await flush();
+  assert.equal(params.encodings[0].scaleResolutionDownBy, 1, 'SDK reconnect reapplies the last quality');
+  sender.setParameters = async () => { throw new Error('Encoder rejected change'); };
+  await assert.rejects(s.client.setQuality({ height: 540, maxFramerate: 15, maxBitrate: 700000 }));
+  assert.equal(s.client.quality.height, null, 'Rejected change must not replace the applied target');
+  s.client.stop();
+  assert.equal(await s.client.setQuality({ height: 720, maxFramerate: 30, maxBitrate: 2000000 }), false);
+});
+
+test('Stopping during an encoder update discards its late result', async () => {
+  let finish;
+  const s = setup({ track: { getSettings: () => ({ height: 1440 }) }, publishOptions: {} });
+  s.client.start(); await flush();
+  s.client.localTrack = { sender: {
+    getParameters: () => ({ encodings: [{}] }),
+    setParameters: () => new Promise(resolve => { finish = resolve; }),
+  } };
+  const pending = s.client.setQuality({ height: 720, maxFramerate: 30, maxBitrate: 2000000 });
+  s.client.stop(); finish();
+  assert.equal(await pending, false);
+  assert.equal(s.client.quality, undefined);
+});

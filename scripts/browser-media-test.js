@@ -5,8 +5,9 @@ import http from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 const injection = `<script>
 const canvas = document.createElement('canvas');
-canvas.width = 1280; canvas.height = 720;
+canvas.width = 2560; canvas.height = 1440;
 const ctx = canvas.getContext('2d');
+ctx.scale(2, 2); // Native 1440p source exercises automatic 720p → 1080p → native.
 let frame = 0;
 const captures = [];
 setInterval(() => {
