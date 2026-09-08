@@ -75,7 +75,7 @@ function setup(file) {
     console: { warn() {} },
   });
   const source = fs.readFileSync(new URL(`../public/js/${file}.js`, import.meta.url), 'utf8')
-    .replace(/^import .*;\n/gm, '').replace('export class ', 'class ');
+    .replace(/^import .*;\r?\n/gm, '').replace('export class ', 'class ');
   const expose = file === 'signaling' ? '{ SignalingClient }'
     : file === 'viewer' ? '{ state, signaling, MESSAGE_HANDLERS, acceptOffer, joinRoom, handleConnectionLost }'
     : '{ state, signaling, MESSAGE_HANDLERS, addViewer, removeViewer, stopShare }';
