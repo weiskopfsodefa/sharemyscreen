@@ -1,6 +1,6 @@
 {
   "name": "sharemyscreen",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Bildschirm live an Tablets im lokalen Netz streamen – WebRTC P2P-Fanout mit gehostetem Signaling.",

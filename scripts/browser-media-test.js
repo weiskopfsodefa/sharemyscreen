@@ -4,10 +4,20 @@
 import http from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 const injection = `<script>
+window.addEventListener('DOMContentLoaded', () => {
+  const video = document.querySelector('#stream');
+  if (!video) return;
+  for (const [label, width, height] of [['Test: 360p', 640, 360], ['Test: Nativ', 2560, 1440]]) {
+    const button = document.createElement('button'); button.textContent = label;
+    button.style.cssText = 'position:relative;z-index:9999';
+    button.onclick = () => { video.style.width = width + 'px'; video.style.height = height + 'px'; };
+    document.body.append(button);
+  }
+});
 const canvas = document.createElement('canvas');
 canvas.width = 2560; canvas.height = 1440;
 const ctx = canvas.getContext('2d');
-ctx.scale(2, 2); // Native 1440p source exercises automatic 720p → 1080p → native.
+ctx.scale(2, 2); // Native 1440p source exercises simulcast layers.
 let frame = 0;
 const captures = [];
 setInterval(() => {
@@ -27,6 +37,24 @@ const server = http.createServer(async (req, res) => {
     const upstream = await fetch('http://127.0.0.1:3210' + req.url);
     let body = Buffer.from(await upstream.arrayBuffer());
     const contentType = upstream.headers.get('content-type') || '';
+    if (req.url === '/js/media-client.js') {
+      body = Buffer.from(body.toString().replace('this.active = false;', 'this.active = false; monitor(this);') + `
+function monitor(client) {
+  const output = document.createElement('pre'); output.id = 'media-test-stats'; document.body.append(output);
+  const timer = setInterval(async () => {
+    const track = client.localTrack || client.remoteTrack;
+    if (!track) return;
+    const report = await track.getRTCStatsReport();
+    const rows = [...report.values()].filter(s => s.type === 'outbound-rtp' || s.type === 'inbound-rtp')
+      .map(({type, rid, frameWidth, frameHeight, framesPerSecond, bytesSent, bytesReceived, jitterBufferDelay, jitterBufferEmittedCount}) =>
+        ({type, rid, frameWidth, frameHeight, framesPerSecond, bytesSent, bytesReceived, jitterBufferDelay, jitterBufferEmittedCount}));
+    output.textContent = JSON.stringify({encodings: client.localTrack?.sender?.getParameters().encodings,
+      bufferTarget: client.remoteTrack?.receiver?.jitterBufferTarget, rows});
+  }, 1000);
+  window.addEventListener('pagehide', () => clearInterval(timer), {once: true});
+}
+`);
+    }
     if (contentType.includes('text/html')) body = Buffer.from(body.toString().replace('<script type="module">', injection + '<script type="module">'));
     res.writeHead(upstream.status, { 'content-type': contentType, 'cache-control': 'no-store' }); res.end(body);
   } catch { res.writeHead(502); res.end('Start the local server first.'); }

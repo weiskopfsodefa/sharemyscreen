@@ -211,24 +211,29 @@ SDK und Oberfläche werden lokal ausgeliefert; lokale Seiten laden keine Webfont
 aus dem Internet. Nach Installation ist für den Medienserver-Modus kein Internet
 nötig. Im Direktmodus bleibt die bisherige STUN-Konfiguration bestehen.
 
-### Qualität und Grenzen dieser ersten SFU-Version
+### Qualität und Wiedergabepuffer im SFU-Modus
 
-- Ein VP8-Videostream ohne Simulcast/zusätzlichen Backup-Codec für alle Tablets.
-  „Automatisch“ startet mit bis zu **720p / 30 fps / 2 Mbit/s** und steigt nach
-  jeweils 30 Sekunden stabiler Messwerte bis zur **nativen Quellauflösung / 30 fps**
-  (maximal 6 Mbit/s). Die Quelle bleibt nativ, nur der Encoder skaliert herunter.
-  Bei anhaltender CPU-/Bandbreitenbegrenzung, Paketverlust über 3 % oder deutlich
-  weniger decodierten als gesendeten Frames senkt die Automatik die gemeinsame Stufe.
-  Bewegung priorisiert FPS, Bildschärfe priorisiert Auflösung. Fehlende Messwerte
-  verhindern Aufstiege; nach gescheiterten Aufstiegen wächst die Wartezeit bis 5 Minuten.
-  Ein schwaches Tablet kann damit die Qualität aller Empfänger senken. Zielstufe und
-  tatsächlich empfangene Auflösung werden getrennt angezeigt. Nativ meint die vom
-  Browser gelieferte Quellauflösung, nicht eine künstliche Vergrößerung.
-- Feste Presets gelten gemeinsam für alle Empfänger. Qualität und Übertragungsweg
-  sind während des Streams gesperrt. Zum Wechseln stoppen und neu starten.
-- Zehn Tablets erhalten weiterhin zehn Kopien über das WLAN; reduziert wird die
-  Anzahl der vom Host-Browser erzeugten Streams. Ein langsamer Empfänger bekommt
-  noch keine eigene Auflösungsvariante.
+- VP8-Simulcast: eine Veröffentlichung mit bis zu drei Auflösungsstufen.
+  „Automatisch“ erlaubt die native Quellauflösung mit bis zu 30 fps und 6 Mbit/s.
+  Zusätzliche Stufen haben 360 und 720 Pixel an der kurzen Bildkante, soweit
+  die Quelle größer ist. Feste Presets begrenzen die höchste Stufe.
+- LiveKit wählt pro Tablet anhand der Empfangsbandbreite und angezeigten
+  Videogröße (einschließlich Pixeldichte). Ein schwacher Empfänger senkt dadurch
+  nicht mehr die gemeinsame Zielauflösung. Dynacast pausiert ungenutzte Stufen;
+  adaptiveStream pausiert unsichtbare Videos. Die Quelle wird nicht hochgerechnet.
+- Bewegung erlaubt bis zu 30 fps auf allen Stufen. Bildschärfe begrenzt die
+  zusätzlichen kleineren Stufen auf 15 fps; die höchste folgt dem gewählten Preset.
+  Qualität und Übertragungsweg sind während des Streams gesperrt.
+- 500 ms sind das Wiedergabepuffer-Ziel, keine garantierte Ende-zu-Ende-Latenz.
+  Beide Rollen bekommen dieselbe LiveKit-Raumkonfiguration (min/max 500 ms).
+  Unterstützte Empfänger erhalten zusätzlich `jitterBufferTarget = 500` bzw.
+  `playoutDelayHint = 0.5`, auch nach Reconnect. Browser können davon abweichen.
+  Der Puffer hilft bei kurzen Ankunftsschwankungen und Paketnachlieferungen;
+  dauerhafte Bandbreiten- oder CPU-Engpässe behebt er nicht. Der Direktmodus bleibt
+  bei seiner bisherigen Pufferung und Qualitätsautomatik.
+- Zehn Tablets erhalten weiterhin zehn Kopien über das WLAN. Der Host erzeugt
+  maximal drei benötigte Varianten, was mehr Rechenleistung als ein Einzelstream
+  erfordern kann. Native Auflösung und 30 fps hängen von Quelle und Hardware ab.
 - Die Geräteliste zeigt pro Tablet empfangene Bitrate, decodierte fps, Auflösung
   und Paketverlust (Intervallmessung etwa alle 3 Sekunden). Ping bezieht sich auf
   Tablet ↔ Medienserver, nicht auf die Ende-zu-Ende-Videoverzögerung. Nach 10 Sekunden

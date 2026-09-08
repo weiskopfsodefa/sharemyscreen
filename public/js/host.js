@@ -1,4 +1,3 @@
-import { createMediaAuto, advanceMediaAuto } from './media-auto.js';
 import { MediaClient } from './media-client.js';
 import { SignalingClient } from './signaling.js';
 import { createPeerConnection, readConnectionStats, formatBitrate, PATH_LABELS } from './webrtc.js';
@@ -95,7 +94,6 @@ const state = {
   starting: false,
   media: null,
   mediaSession: null,
-  mediaAuto: null,
   mediaStatus: null,
   mediaClient: null,
   mediaParticipants: new Set(),
@@ -205,7 +203,7 @@ function renderTransport() {
   ui.localLauncher.hidden = !media || Boolean(state.media?.available);
   ui.shareBtn.disabled = state.starting || !state.code || (media && !state.media?.available);
   ui.transportHint.textContent = media
-    ? state.media?.available ? 'Ein gemeinsamer Stream über LiveKit im LAN. Qualität gilt für alle Tablets.' : 'Für den Medienserver die Host-App auf diesem Laptop öffnen.'
+    ? state.media?.available ? 'LiveKit im LAN · passende Qualität pro Tablet, 500 ms Wiedergabepuffer als Zielwert.' : 'Für den Medienserver die Host-App auf diesem Laptop öffnen.'
     : 'Direkt vom Laptop zu jedem Tablet.';
 }
 ui.transportMode.addEventListener('change', () => { renderTransport(); renderQualityHint(); });
@@ -227,8 +225,7 @@ async function startShare() {
   ui.qualitySelect.disabled = useMedia;
   let stream;
   try {
-    state.mediaAuto = useMedia && currentPreset().auto ? createMediaAuto(state.streamMode) : null;
-    const preset = state.mediaAuto ? state.mediaAuto.ladder[state.mediaAuto.index] : currentPreset();
+    const preset = useMedia && currentPreset().auto ? QUALITY_PRESETS.source : currentPreset();
     stream = await navigator.mediaDevices.getDisplayMedia({ video: CAPTURE_VIDEO });
     if (generation !== state.startGeneration) { stream.getTracks().forEach(track => track.stop()); return; }
     state.stream = stream;
@@ -243,7 +240,7 @@ async function startShare() {
     ui.onairText.textContent = useMedia ? 'Verbinde…' : 'ON AIR';
 
     if (useMedia) {
-      const captureHeight = state.mediaAuto ? null : preset.height;
+      const captureHeight = preset.height;
       await videoTrack.applyConstraints({
         ...(captureHeight ? { height: { ideal: captureHeight, max: captureHeight } } : {}),
         frameRate: { ideal: preset.maxFramerate, max: preset.maxFramerate },
@@ -255,17 +252,16 @@ async function startShare() {
       state.mediaClient = new MediaClient({
         credentials: () => signaling.request({ type: 'media:token', session: state.mediaSession }),
         track: videoTrack,
-        quality: state.mediaAuto ? preset : null,
+        streamMode: state.streamMode,
         publishOptions: {
           screenShareEncoding: { maxBitrate: preset.maxBitrate, maxFramerate: preset.maxFramerate },
           degradationPreference: currentStreamMode().degradationPreference,
         },
         onStatus: status => {
           state.mediaStatus = status;
-          if (status !== 'connected' && state.mediaAuto) state.mediaAuto.cleanSince = null;
           ui.onairText.textContent = status === 'connected' ? 'ON AIR' : 'Verbinde…';
           ui.transportHint.textContent = status === 'connected'
-            ? 'LiveKit verbunden · ein gemeinsamer Stream im LAN. Geräte-Status zeigt die Verbindung zum Medienserver.'
+            ? 'LiveKit verbunden · Qualität pro Tablet · ungenutzte Stufen pausieren automatisch.'
             : 'Medienserver nicht verbunden – versuche automatisch erneut.';
         },
         onParticipants: participants => {
@@ -304,7 +300,6 @@ function stopShare() {
   const hadMedia = state.mediaSession || selectedTransport() === 'livekit';
   state.mediaClient?.stop();
   state.mediaClient = null;
-  state.mediaAuto = null;
   state.mediaStatus = null;
   state.mediaSession = null;
   state.mediaParticipants.clear();
@@ -580,9 +575,11 @@ function applyQualityToAll() {
 function renderQualityHint() {
   const preset = currentPreset();
   if (selectedTransport() === 'livekit') {
-    ui.qualityHint.textContent = currentPreset().auto
-      ? `Automatisch · gemeinsame Zielstufe: ${state.mediaAuto ? state.mediaAuto.ladder[state.mediaAuto.index].label : '720p / 30 FPS'}. Nach 30 Sekunden stabiler Übertragung schrittweise bis zur nativen Quellauflösung; bei Engpässen zurück. Ein schwaches Tablet kann die Qualität für alle senken.`
-      : 'Gemeinsame Qualität für alle Tablets. Zum Ändern die Übertragung beenden.';
+    ui.qualityHint.textContent = (preset.auto
+      ? 'Automatisch pro Tablet bis zur nativen Quellauflösung.'
+      : `${preset.label} ist die Obergrenze; jedes Tablet erhält eine passende Qualitätsstufe. Zum Ändern stoppen.`)
+      + (state.streamMode === 'motion' ? ' Kleinere Stufen behalten möglichst die gewählte Bildrate.' : ' Kleinere Stufen nutzen bis zu 15 fps für mehr Bildschärfe bei gleicher Bandbreite.')
+      + ' Simulcast mit Dynacast · Puffer-Ziel: 500 ms (browserabhängig).';
     return;
   }
   if (preset.auto) {
@@ -647,33 +644,7 @@ async function handleViewerSignal({ viewerId, payload }) {
 
 // --- Diagnose: Verbindungsweg, Bitrate, Verlust pro Tablet ---
 
-let mediaAutoBusy = false;
-async function updateMediaAuto() {
-  const client = state.mediaClient;
-  const auto = state.mediaAuto;
-  if (!client || !auto || mediaAutoBusy || state.mediaStatus !== 'connected') return;
-  mediaAutoBusy = true;
-  try {
-    const upload = await client.readUploadStats();
-    if (client !== state.mediaClient || auto !== state.mediaAuto || state.mediaStatus !== 'connected') return;
-    const receivers = [...state.mediaParticipants].map(id => {
-      const viewer = state.viewers.get(id);
-      return { id, stats: viewer?.stats, at: viewer?.statsReceivedAt || 0 };
-    });
-    const next = { ...auto };
-    const changed = advanceMediaAuto(next, { now: Date.now(), upload, receivers });
-    if (changed && !await client.setQuality(next.ladder[next.index])) return;
-    if (client !== state.mediaClient || auto !== state.mediaAuto) return;
-    state.mediaAuto = next;
-    if (changed) renderQualityHint();
-  } catch {
-    // Keep the last applied target; never display a level the encoder rejected.
-    if (auto === state.mediaAuto) auto.cleanSince = null;
-  } finally { mediaAutoBusy = false; }
-}
-
 setInterval(async () => {
-  await updateMediaAuto();
   let anyRelay = false;
   for (const viewer of state.viewers.values()) {
     if (!viewer.pc || viewer.pc.connectionState !== 'connected') continue;

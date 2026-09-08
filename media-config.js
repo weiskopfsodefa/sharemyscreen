@@ -1,4 +1,5 @@
-import { AccessToken, TrackSource } from 'livekit-server-sdk';
+import { PLAYOUT_TARGET_MS } from './public/js/media-options.js';
+import { AccessToken, TrackSource, RoomConfiguration } from 'livekit-server-sdk';
 import net from 'node:net';
 
 export function isPrivateIPv4(address) {
@@ -18,6 +19,8 @@ export async function mediaToken(config, { code, session, role, viewerId, name }
   const token = new AccessToken(config.key, config.secret, {
     identity: role === 'host' ? 'host' : viewerId, name: name || role, ttl: '5m',
   });
+  // The first participant creates the room: host and viewer tokens need the same hints.
+  token.roomConfig = new RoomConfiguration({ minPlayoutDelay: PLAYOUT_TARGET_MS, maxPlayoutDelay: PLAYOUT_TARGET_MS });
   token.addGrant({
     room: `sms-${code}-${session}`, roomJoin: true,
     canPublish: role === 'host', canSubscribe: role !== 'host', canPublishData: false,

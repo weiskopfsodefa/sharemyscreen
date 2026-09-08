@@ -71,6 +71,10 @@ test('Optional media signaling grants only the host publishing rights, isolates 
   const verifier = new TokenVerifier('testkey', secret);
   const h = await verifier.verify((await host.wait('reply')).token);
   const v = await verifier.verify((await viewer.wait('reply')).token);
+  for (const claims of [h, v]) {
+    assert.equal(claims.roomConfig.minPlayoutDelay, 500);
+    assert.equal(claims.roomConfig.maxPlayoutDelay, 500);
+  }
   assert.equal(h.video.canPublish, true); assert.deepEqual(h.video.canPublishSources, ['screen_share']);
   assert.equal(v.video.canPublish, false); assert.equal(v.video.canSubscribe, true);
   assert.equal(v.sub, joined.viewerId); assert.equal(v.video.room, h.video.room);
