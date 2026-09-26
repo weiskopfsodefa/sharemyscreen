@@ -112,8 +112,10 @@ Die [Host-App](docs/host-app.md) bündelt Oberfläche, Laufzeit und LiveKit. Nut
 brauchen nach Installation kein Node.js, Go, Terminal oder separates LiveKit.
 Quellcode und [Installer-Releases](https://github.com/weiskopfsodefa/sharemyscreen/releases)
 liegen im öffentlichen Projekt-Repository. `public/downloads.json` enthält die öffentlichen
-Asset-URLs. Die Installer werden unsigniert angeboten; Plattformabnahmen für
-Windows und Intel-Macs stehen noch aus.
+Asset-URLs. Der macOS-Download für Apple Silicon (M1 oder neuer) ist mit Developer ID
+signiert und von Apple notarisiert. Intel-Mac-Installer werden nicht mehr angeboten.
+Der Windows-Installer ist noch unsigniert; die Plattformabnahme auf Windows steht aus.
+Für künftige Builds siehe die [Signing-Anleitung](docs/host-app.md#apple-signierung-einmalig-einrichten).
 
 Entwickler: `npm ci`, `npm run desktop:prepare`, `npm run desktop:dev`.
 Installer: `npm run desktop:build`. Voraussetzung fürs Bauen: Go >= 1.26 und tar.

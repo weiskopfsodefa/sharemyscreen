@@ -5,7 +5,7 @@ try {
   if (!response.ok) throw new Error('Downloads unavailable');
   const downloads = await response.json();
   let count = 0;
-  for (const [key, label] of Object.entries({ 'mac-arm64': 'macOS · Apple Silicon', 'mac-x64': 'macOS · Intel', 'windows-x64': 'Windows' })) {
+  for (const [key, label] of Object.entries({ 'mac-arm64': 'macOS · Apple Silicon', 'windows-x64': 'Windows · 64 Bit' })) {
     const url = downloads[key];
     const valid = typeof url === 'string' && url.startsWith('https://github.com/weiskopfsodefa/sharemyscreen/releases/download/');
     const element = document.createElement(valid ? 'a' : 'button');

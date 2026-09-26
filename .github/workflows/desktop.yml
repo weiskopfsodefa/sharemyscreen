@@ -11,6 +11,7 @@ on:
       - 'media-config.js'
       - 'package*.json'
       - 'electron-builder.cjs'
+      - 'electron-builder.release.cjs'
       - '.github/workflows/desktop.yml'
 permissions:
   contents: read
@@ -22,8 +23,6 @@ jobs:
         include:
           - os: macos-latest
             arch: arm64
-          - os: macos-15-intel
-            arch: x64
           - os: windows-latest
             arch: x64
     runs-on: ${{ matrix.os }}
@@ -42,12 +41,35 @@ jobs:
       - run: npm run desktop:prepare
         env:
           DESKTOP_ARCH: ${{ matrix.arch }}
-      - run: npm run desktop:build -- --${{ matrix.arch }}
+      - name: Build test installer or Windows installer
+        if: github.event_name == 'pull_request' || runner.os == 'Windows'
+        run: npm run desktop:build -- --${{ matrix.arch }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Sign and notarize macOS release
+        if: github.event_name == 'workflow_dispatch' && runner.os == 'macOS'
+        run: npx electron-builder --config electron-builder.release.cjs --publish never --${{ matrix.arch }}
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Verify macOS release before upload
+        if: github.event_name == 'workflow_dispatch' && runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          apps=(dist-desktop/mac*/"sharemyscreen Host.app")
+          test "${#apps[@]}" -eq 1
+          app="${apps[0]}"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --verify --strict --verbose=2 "$app/Contents/Resources/livekit/livekit-server"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=2 "$app"
       - uses: actions/upload-artifact@v4
         with:
-          name: host-app-${{ matrix.os }}-${{ matrix.arch }}
+          name: host-app-${{ github.event_name == 'pull_request' && 'test' || 'release' }}-${{ matrix.os }}-${{ matrix.arch }}
           path: |
             dist-desktop/*.dmg
             dist-desktop/*.exe
